@@ -131,11 +131,13 @@ npm run mcp:install
 npm run mcp:build
 ```
 
-**Cursor:** `.cursor/mcp.json` is preconfigured. Enable MCP in settings, ensure `npm run engine:up` is running, then ask your agent to use `snow_assembler_validate_project` or `snow_assembler_assemble_images`.
-
 **Tools:** `snow_assembler_engine_health`, `snow_assembler_validate_project`, `snow_assembler_assemble_images`
 
-See [mcp-server/README.md](mcp-server/README.md) for setup and example flows.
+See [mcp-server/MCP_SETUP.md](mcp-server/MCP_SETUP.md) for Grok, Antigravity, VS Code, Cursor, and Claude Desktop setup.
+
+## System metrics
+
+The assembler UI shows live **CPU, RAM, and disk** usage from the FFmpeg engine (polls every ~2.5s). During renders, higher CPU usually means FFmpeg is encoding at full speed — useful for understanding render time vs hardware.
 
 ## Roadmap
 

@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 
 import { EngineStatus } from "@/components/assembler/engine-status";
+import { SystemMonitor } from "@/components/assembler/system-monitor";
 import { SceneMatchTable } from "@/components/assembler/scene-match-table";
 import { WorkflowSteps } from "@/components/assembler/workflow-steps";
 import { Badge } from "@/components/ui/badge";
@@ -237,6 +238,7 @@ export function AssemblerWorkspace() {
   return (
     <div className="space-y-8">
       <EngineStatus />
+      <SystemMonitor active={isAssembling} />
       <WorkflowSteps />
 
       <div className="flex flex-wrap gap-2">

@@ -52,3 +52,38 @@ export type UploadAssemblySettings = {
   fps: number;
   motion: MotionMode;
 };
+
+export type ByteMetric = {
+  bytes: number;
+  gib: number;
+  display: string;
+};
+
+export type SystemStats = {
+  timestamp: number;
+  host: string;
+  platform: string;
+  context: "docker" | "host";
+  cpu: {
+    percent: number;
+    count: number;
+    loadAverage: number[] | null;
+  };
+  memory: {
+    total: ByteMetric;
+    used: ByteMetric;
+    available: ByteMetric;
+    percent: number;
+  };
+  disk: {
+    path: string;
+    total: ByteMetric;
+    used: ByteMetric;
+    free: ByteMetric;
+    percent: number;
+  };
+  process: {
+    pid: number;
+    memoryPercent: number;
+  };
+};

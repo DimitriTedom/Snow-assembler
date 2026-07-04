@@ -16,6 +16,7 @@ from assemble import AssemblyResult, assemble_image_episode, cleanup_temp_dir, e
 from images import ImageNaming, match_scenes_to_images
 from project import discover_images_dir, discover_scenes_json, resolve_project_paths
 from scenes import SceneSource, load_scenes_json, normalize_scenes_payload
+from system import get_system_stats
 
 app = FastAPI(title="Snow Assembler Engine", version="0.1.0")
 
@@ -131,6 +132,11 @@ def build_validation(
         missingScenes=missing_summaries,
         unusedImages=[path.name for path in validation.unused_images],
     )
+
+
+@app.get("/system/stats")
+def system_stats() -> dict:
+    return get_system_stats()
 
 
 @app.get("/health")

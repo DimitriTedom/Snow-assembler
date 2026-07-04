@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "snow-assembler": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/mcp-server/dist/index.js"],
+      "env": {
+        "ASSEMBLER_ENGINE_URL": "http://localhost:8001"
+      }
+    }
+  }
+}

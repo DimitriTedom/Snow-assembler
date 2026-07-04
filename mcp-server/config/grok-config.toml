@@ -1,0 +1,9 @@
+# Merge into ~/.grok/config.toml (user scope) or .grok/config.toml (project scope).
+# Replace ABSOLUTE_PATH_TO_REPO with your Snow-assembler install path.
+# Windows tip: use forward slashes in paths, e.g. D:/SnowDev/Videos/Youtube/CRAVE & CONQUER/Snow-assembler
+
+[mcp_servers.snow-assembler]
+command = "node"
+args = ["ABSOLUTE_PATH_TO_REPO/mcp-server/dist/index.js"]
+env = { ASSEMBLER_ENGINE_URL = "http://localhost:8001" }
+enabled = true

@@ -28,9 +28,17 @@ Uses **stdio** transport → talks to the FFmpeg engine at `http://localhost:800
 
 - `snow://assembler/workflow/guide` — Agent workflow for Zenn pipelines
 
-## Configure Cursor
+## Configure your agent
 
-`.cursor/mcp.json` is preconfigured in this repo. Enable MCP in Cursor settings, ensure `npm run engine:up` is running.
+See **[MCP_SETUP.md](./MCP_SETUP.md)** for full setup across:
+
+- **Grok** (`~/.grok/config.toml`)
+- **Antigravity IDE / Gemini CLI** (`~/.gemini/config/mcp_config.json`)
+- **VS Code** (`.vscode/mcp.json`)
+- **Cursor** (`.cursor/mcp.json`)
+- **Claude Desktop** (`config/claude-desktop.mcp.json`)
+
+Template configs live in `mcp-server/config/`.
 
 ## Example agent flow
 
