@@ -1,4 +1,22 @@
 services:
+  engine:
+    build:
+      context: ./engine
+    ports:
+      - "8001:8001"
+    environment:
+      ENGINE_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      ASSEMBLER_OUTPUT_DIR: /tmp/snow-assembler-output
+    volumes:
+      - ${ZENN_DATA_DIR:-C:/Users/Dimitri SnowDev/Documents/Zenn}:/data/zenn:ro
+      - assembler-output:/tmp/snow-assembler-output
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
   app:
     build: .
     ports:
@@ -8,3 +26,10 @@ services:
     environment:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
+      ASSEMBLER_ENGINE_URL: http://engine:8001
+    depends_on:
+      engine:
+        condition: service_healthy
+
+volumes:
+  assembler-output:

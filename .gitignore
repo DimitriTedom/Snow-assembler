@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+engine/test_episode/
+engine/__pycache__/
+**/__pycache__/
 
 # vercel
 .vercel
@@ -41,3 +44,7 @@ yarn-error.log*
 next-env.d.ts
 
 /lib/generated/prisma
+
+# mcp-server
+/mcp-server/node_modules
+/mcp-server/dist

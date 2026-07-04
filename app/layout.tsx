@@ -1,29 +1,41 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import "./../styles/globals.css";
+import { Inter, JetBrains_Mono } from "next/font/google";
+import "../styles/globals.css";
 
+import { AmbientBackground } from "@/components/ambient-background";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SiteHeader } from "@/components/site-header";
 import { Toaster } from "@/components/ui/sonner";
 
-const inter = Inter({ subsets: ["latin"], display: "swap" });
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-mono",
+});
 
 export const metadata: Metadata = {
   title: {
-    default: "Next.js Template",
-    template: "%s | Next.js Template",
+    default: "Snow Assembler",
+    template: "%s | Snow Assembler",
   },
-  description: "Next.js 15 + Supabase Auth + Prisma starter template.",
+  description: "Automated image-to-video assembly for Zenn and SnowAgeBrain episodes.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
-        <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
+    <html lang="en" suppressHydrationWarning className="dark">
+      <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans`}>
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+          <AmbientBackground />
           <SiteHeader />
-          <main className="mx-auto max-w-5xl px-4 py-10">{children}</main>
-          <Toaster />
+          <main className="mx-auto w-full max-w-7xl px-4 pb-16 pt-24 sm:px-6 lg:px-8">{children}</main>
+          <Toaster richColors closeButton />
         </ThemeProvider>
       </body>
     </html>

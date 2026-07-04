@@ -1,0 +1,27 @@
+{
+  "name": "snow-assembler-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for Snow Assembler — image timelines to synced MP4 episodes",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "snow-assembler-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "node scripts/run-tsc.mjs",
+    "dev": "node scripts/run-tsx.mjs src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.25.56"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.19.4",
+    "typescript": "^5"
+  }
+}
