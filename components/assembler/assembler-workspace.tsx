@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   CheckCircle2,
   Download,
@@ -77,9 +78,18 @@ function downloadBlob(filename: string, blob: Blob) {
 }
 
 export function AssemblerWorkspace() {
-  const [workflow, setWorkflow] = useState<"zenn" | "crave">("zenn");
-  const [mode, setMode] = useState<"project" | "upload">("project");
-  const [settings, setSettings] = useState<ProjectAssemblySettings>(zennSettings);
+  const searchParams = useSearchParams();
+  const workflowFromUrl = searchParams.get("workflow");
+
+  const [workflow, setWorkflow] = useState<"zenn" | "crave">(() =>
+    workflowFromUrl === "crave" ? "crave" : "zenn",
+  );
+  const [mode, setMode] = useState<"project" | "upload">(() =>
+    workflowFromUrl === "crave" ? "project" : "project",
+  );
+  const [settings, setSettings] = useState<ProjectAssemblySettings>(() =>
+    workflowFromUrl === "crave" ? craveSettings : zennSettings,
+  );
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [assembly, setAssembly] = useState<AssemblyResult | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -125,8 +135,9 @@ export function AssemblerWorkspace() {
       }
 
       setValidation(payload as ValidationResult);
+      const assetWord = settings.mediaType === "videos" ? "clips" : "images";
       toast.success(
-        `${payload.matchedCount}/${payload.sceneCount} scenes matched (${payload.imageNaming} naming).`,
+        `${payload.matchedCount}/${payload.sceneCount} scenes matched (${assetWord}).`,
       );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Validation failed.");
@@ -202,7 +213,11 @@ export function AssemblerWorkspace() {
       }
 
       setAssembly(payload as AssemblyResult);
-      toast.success(`Rendered ${payload.sceneCount} scenes to ${payload.outputPath}`);
+      toast.success(
+        isVideoWorkflow
+          ? `Rendered ${payload.sceneCount} Veo3 clips → ${payload.outputPath}`
+          : `Rendered ${payload.sceneCount} scenes to ${payload.outputPath}`,
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Assembly failed.");
     } finally {
@@ -267,8 +282,47 @@ export function AssemblerWorkspace() {
   return (
     <div className="space-y-8">
       <EngineStatus />
-      <SystemMonitor active={isAssembling} />
-      <WorkflowSteps />
+      <SystemMonitor active={isAssembling || isValidating} />
+
+      <div
+        className={cn(
+          "rounded-xl border px-4 py-3",
+          isVideoWorkflow
+            ? "border-primary/25 bg-primary/5"
+            : "border-white/8 bg-secondary/30",
+        )}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium">
+              {isVideoWorkflow ? "CRAVE & CONQUER · Veo3 clips" : "Zenn · batch images"}
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {isVideoWorkflow
+                ? "snow-transcriber-agent.json + .m4a + SCENE_XX.mp4 folder"
+                : "timeline JSON + images/ + TTS audio"}
+            </p>
+          </div>
+          {isVideoWorkflow ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="cursor-pointer text-xs"
+              onClick={() => {
+                setSettings(craveSettings);
+                setValidation(null);
+                setAssembly(null);
+                toast.message("Loaded CRAVE test folder path.");
+              }}
+            >
+              Load test episode
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      <WorkflowSteps variant={workflow} />
 
       <div className="flex flex-wrap gap-2">
         <Button
@@ -301,16 +355,28 @@ export function AssemblerWorkspace() {
           <FolderOpen className="mr-2 h-4 w-4" />
           Episode folder
         </Button>
-        <Button
-          type="button"
-          variant={mode === "upload" ? "default" : "outline"}
-          className="cursor-pointer"
-          onClick={() => setMode("upload")}
-        >
-          <Upload className="mr-2 h-4 w-4" />
-          Upload assets
-        </Button>
+        {!isVideoWorkflow ? (
+          <Button
+            type="button"
+            variant={mode === "upload" ? "default" : "outline"}
+            className="cursor-pointer"
+            onClick={() => setMode("upload")}
+          >
+            <Upload className="mr-2 h-4 w-4" />
+            Upload assets
+          </Button>
+        ) : null}
       </div>
+
+      {isAssembling && isVideoWorkflow ? (
+        <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <p className="font-medium">Rendering Veo3 episode…</p>
+          <p className="mt-1 text-xs text-amber-200/90">
+            FFmpeg is trimming and re-encoding each clip. Large episodes (50+ scenes) can take several
+            minutes — watch CPU/RAM above.
+          </p>
+        </div>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
         <section className="space-y-5 rounded-2xl border border-white/8 bg-card/60 p-5 backdrop-blur-sm">
@@ -330,7 +396,7 @@ export function AssemblerWorkspace() {
                 Veo3 clip assembly uses <strong>Episode folder</strong> mode — local SCENE_XX.mp4 files on disk.
               </p>
             ) : null}
-            {mode === "upload" ? (
+            {!isVideoWorkflow && mode === "upload" ? (
               <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
                 For full episodes (100+ images), prefer <strong>Episode folder</strong> mode — it reads
                 files from disk and is much faster. Upload mode is best for quick tests.
@@ -561,7 +627,7 @@ export function AssemblerWorkspace() {
               ) : (
                 <Play className="mr-2 h-4 w-4" />
               )}
-              Assemble episode
+              {isVideoWorkflow ? "Render video episode" : "Assemble episode"}
             </Button>
           </div>
         </section>
@@ -628,9 +694,15 @@ export function AssemblerWorkspace() {
               <Search className="mb-3 h-8 w-8 text-muted-foreground" />
               <p className="text-sm font-medium">Validate before you render</p>
               <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-                Snow-assembler matches images to scene timestamps, then FFmpeg trims each still and
-                muxes your Google TTS narration.
+                {isVideoWorkflow
+                  ? "Match SCENE_XX.mp4 clips to Snow-transcriber timestamps, then FFmpeg trims each clip and muxes your voiceover."
+                  : "Match batch images to scene timestamps, then FFmpeg trims each still and muxes your narration."}
               </p>
+              {isVideoWorkflow ? (
+                <p className="mt-3 font-mono text-[11px] text-muted-foreground">
+                  {craveProjectDir}
+                </p>
+              ) : null}
             </div>
           )}
 

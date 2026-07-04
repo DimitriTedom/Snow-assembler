@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { ArrowLeft, Plug } from "lucide-react";
 
 import { AssemblerWorkspace } from "@/components/assembler/assembler-workspace";
@@ -7,7 +8,7 @@ import { Button } from "@/components/ui/button";
 
 export const metadata = {
   title: "Workspace",
-  description: "Assemble batch images into timestamp-synced videos with FFmpeg.",
+  description: "Assemble Zenn image episodes or CRAVE Veo3 clip timelines with FFmpeg.",
 };
 
 export default function AssemblerPage() {
@@ -22,16 +23,16 @@ export default function AssemblerPage() {
             </Link>
           </Button>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="default">SnowAgeBrain / Zenn</Badge>
-            <Badge variant="secondary">Image MVP</Badge>
+            <Badge variant="default">Zenn images</Badge>
+            <Badge variant="secondary">CRAVE Veo3</Badge>
             <Badge variant="outline">FFmpeg local</Badge>
           </div>
           <h1 className="text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
-            Images → <span className="text-primary">synced episode</span>
+            Episode <span className="text-primary">assembler</span>
           </h1>
           <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Replace CapCut assembly for stick-figure niches. Trim each batch image to its
-            Snow-transcriber or Zenn timeline duration, concat, and mux Google TTS narration.
+            Pick a workflow below — batch images for Zenn, or Veo3 clips for CRAVE &amp; CONQUER.
+            Validate scene matching, then render a synced MP4 with your narration.
           </p>
           <Button asChild variant="outline" size="sm" className="cursor-pointer">
             <Link href="/mcp" className="flex items-center gap-1.5">
@@ -42,7 +43,18 @@ export default function AssemblerPage() {
         </div>
       </div>
 
-      <AssemblerWorkspace />
+      <Suspense fallback={<WorkspaceSkeleton />}>
+        <AssemblerWorkspace />
+      </Suspense>
+    </div>
+  );
+}
+
+function WorkspaceSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="h-14 animate-pulse rounded-xl border border-white/8 bg-secondary/30" />
+      <div className="h-96 animate-pulse rounded-2xl border border-white/8 bg-secondary/20" />
     </div>
   );
 }
