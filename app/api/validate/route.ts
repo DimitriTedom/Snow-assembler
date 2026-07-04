@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { toEngineProjectPayload } from "@/lib/assembler/api";
+
 export const runtime = "nodejs";
 
 const ENGINE_URL = process.env.ASSEMBLER_ENGINE_URL ?? "http://localhost:8001";
@@ -9,7 +11,18 @@ export async function POST(request: Request) {
     const contentType = request.headers.get("content-type") ?? "";
 
     if (contentType.includes("multipart/form-data")) {
-      const incoming = await request.formData();
+      let incoming: FormData;
+      try {
+        incoming = await request.formData();
+      } catch {
+        return NextResponse.json(
+          {
+            error:
+              "Upload too large for Next.js proxy. Use Episode folder mode, or upload directly via the workspace (engine :8001).",
+          },
+          { status: 413 },
+        );
+      }
       const engineForm = new FormData();
       const scenesJson = incoming.get("scenes_json");
       const imageNaming = incoming.get("image_naming") ?? "auto";
@@ -41,18 +54,20 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
+    const engineBody =
+      "project_dir" in body || "projectDir" in body ? toEngineProjectPayload(body) : body;
     const response = await fetch(`${ENGINE_URL}/validate/project`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(engineBody),
     });
-    const payload = await response.json();
+    const result = await response.json();
 
     if (!response.ok) {
-      return NextResponse.json({ error: payload.detail ?? "Validation failed." }, { status: response.status });
+      return NextResponse.json({ error: result.detail ?? "Validation failed." }, { status: response.status });
     }
 
-    return NextResponse.json(payload);
+    return NextResponse.json(result);
   } catch (error) {
     const message =
       error instanceof Error && error.message.includes("fetch failed")

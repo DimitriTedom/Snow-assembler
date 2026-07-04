@@ -21,6 +21,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toDockerZennPath } from "@/lib/assembler/api";
+import { getPublicEngineUrl } from "@/lib/assembler/engine-url";
 import { cn } from "@/lib/utils";
 import type {
   AssemblyResult,
@@ -33,13 +35,10 @@ import type {
 const defaultProjectDir =
   "C:/Users/Dimitri SnowDev/Documents/Zenn/episodes/why_you_cant_stop_scrolling";
 
-const dockerProjectDir =
-  "/data/zenn/episodes/why_you_cant_stop_scrolling";
-
 const defaultSettings: ProjectAssemblySettings = {
   projectDir: defaultProjectDir,
   outputFilename: "assembled.mp4",
-  imageNaming: "auto",
+  imageNaming: "sequential",
   width: 1920,
   height: 1080,
   fps: 30,
@@ -124,16 +123,22 @@ export function AssemblerWorkspace() {
       const formData = new FormData();
       formData.append("scenes_json", scenesJson);
       formData.append("image_naming", settings.imageNaming);
-      images.forEach((file, index) => formData.append(`images_${index}`, file));
+      images.forEach((file) => formData.append("images", file, file.name));
 
-      const response = await fetch("/api/validate", {
+      const response = await fetch(`${getPublicEngineUrl()}/validate/upload`, {
         method: "POST",
         body: formData,
       });
       const payload = await response.json();
 
       if (!response.ok) {
-        throw new Error(payload.error ?? "Validation failed.");
+        const detail =
+          typeof payload?.detail === "string"
+            ? payload.detail
+            : Array.isArray(payload?.detail)
+              ? payload.detail.map((item: { msg?: string }) => item.msg).join(", ")
+              : "Validation failed.";
+        throw new Error(detail);
       }
 
       setValidation(payload as ValidationResult);
@@ -196,16 +201,27 @@ export function AssemblerWorkspace() {
       formData.append("height", String(settings.height));
       formData.append("fps", String(settings.fps));
       formData.append("motion", settings.motion);
-      images.forEach((file, index) => formData.append(`images_${index}`, file));
+      images.forEach((file) => formData.append("images", file, file.name));
 
-      const response = await fetch("/api/assemble", {
+      const response = await fetch(`${getPublicEngineUrl()}/assemble/images/upload`, {
         method: "POST",
         body: formData,
       });
 
       if (!response.ok) {
-        const payload = await response.json();
-        throw new Error(payload.error ?? "Assembly failed.");
+        let message = "Assembly failed.";
+        try {
+          const payload = await response.json();
+          message =
+            typeof payload?.detail === "string"
+              ? payload.detail
+              : Array.isArray(payload?.detail)
+                ? payload.detail.map((item: { msg?: string }) => item.msg).join(", ")
+                : message;
+        } catch {
+          message = `Assembly failed (HTTP ${response.status}).`;
+        }
+        throw new Error(message);
       }
 
       const blob = await response.blob();
@@ -253,8 +269,14 @@ export function AssemblerWorkspace() {
             <p className="text-sm text-muted-foreground">
               {mode === "project"
                 ? "Point at a Zenn episode folder with timeline JSON, images/, and TTS audio."
-                : "Drop scenes JSON, all batch images, and narration when working without shared folders."}
+                : "Drop scenes JSON, all batch images, and narration. Uploads go directly to the FFmpeg engine (not through Next.js)."}
             </p>
+            {mode === "upload" ? (
+              <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                For full episodes (100+ images), prefer <strong>Episode folder</strong> mode — it reads
+                files from disk and is much faster. Upload mode is best for quick tests.
+              </p>
+            ) : null}
           </div>
 
           {mode === "project" ? (
@@ -270,16 +292,10 @@ export function AssemblerWorkspace() {
                   placeholder={defaultProjectDir}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Docker engine path:{" "}
-                  <button
-                    type="button"
-                    className="cursor-pointer font-mono text-accent underline-offset-2 hover:underline"
-                    onClick={() =>
-                      setSettings((current) => ({ ...current, projectDir: dockerProjectDir }))
-                    }
-                  >
-                    {dockerProjectDir}
-                  </button>
+                  Use your normal Windows folder path above — it auto-maps to{" "}
+                  <span className="font-mono text-accent">{toDockerZennPath(settings.projectDir)}</span>{" "}
+                  inside Docker. Keep files in Documents\Zenn on Windows; do not copy them anywhere
+                  else.
                 </p>
               </div>
 
@@ -295,8 +311,12 @@ export function AssemblerWorkspace() {
                         imagesDir: event.target.value || undefined,
                       }))
                     }
-                    placeholder="images/"
+                    placeholder="leave empty — auto-finds images/"
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Leave blank. Do not type <code className="text-accent">images/</code> — the engine
+                    auto-discovers the folder inside your project directory.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="audioPath">Audio path (optional)</Label>
@@ -309,8 +329,11 @@ export function AssemblerWorkspace() {
                         audioPath: event.target.value || undefined,
                       }))
                     }
-                    placeholder="auto-detect .m4a / .mp3"
+                    placeholder="leave empty — auto-detect .m4a"
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Leave blank unless you have multiple audio files in the folder.
+                  </p>
                 </div>
               </div>
             </div>

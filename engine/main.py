@@ -152,18 +152,15 @@ def health() -> dict[str, str]:
 def validate_project(request: ProjectAssemblyRequest) -> ValidationResponse:
     try:
         project_dir = Path(request.project_dir)
-        scenes_path = (
-            Path(request.scenes_json_path)
-            if request.scenes_json_path
-            else discover_scenes_json(project_dir)
-        )
-        images_path = (
-            Path(request.images_dir)
-            if request.images_dir
-            else discover_images_dir(project_dir, required=False)
+        scenes_path, images_path, _, _ = resolve_project_paths(
+            project_dir,
+            scenes_json_path=Path(request.scenes_json_path) if request.scenes_json_path else None,
+            images_dir=request.images_dir,
+            audio_path=request.audio_path,
+            output_filename=request.output_filename,
         )
 
-        if images_path is None:
+        if images_path is None or not images_path.exists():
             scenes, source, _ = load_scenes_json(scenes_path)
             total_duration = round(sum(scene.duration for scene in scenes), 3)
             scene_summaries = [
@@ -204,8 +201,8 @@ def assemble_images_project(request: ProjectAssemblyRequest) -> AssemblyResponse
         scenes_path, images_path, audio_path, output_path = resolve_project_paths(
             Path(request.project_dir),
             scenes_json_path=Path(request.scenes_json_path) if request.scenes_json_path else None,
-            images_dir=Path(request.images_dir) if request.images_dir else None,
-            audio_path=Path(request.audio_path) if request.audio_path else None,
+            images_dir=request.images_dir,
+            audio_path=request.audio_path,
             output_filename=request.output_filename,
         )
 
