@@ -10,10 +10,12 @@ function formatClock(seconds: number) {
 export function SceneMatchTable({
   scenes,
   title,
+  assetLabel = "Image",
   limit = 12,
 }: {
   scenes: SceneMatchSummary[];
   title: string;
+  assetLabel?: string;
   limit?: number;
 }) {
   const visible = scenes.slice(0, limit);
@@ -31,7 +33,7 @@ export function SceneMatchTable({
               <th className="px-4 py-2 font-medium">Scene</th>
               <th className="px-4 py-2 font-medium">Key</th>
               <th className="px-4 py-2 font-medium">Duration</th>
-              <th className="px-4 py-2 font-medium">Image</th>
+              <th className="px-4 py-2 font-medium">{assetLabel}</th>
             </tr>
           </thead>
           <tbody>

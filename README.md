@@ -4,7 +4,7 @@ Local image-to-video assembler for **Zenn / SnowAgeBrain** and other batch-image
 
 Turn timestamped stills + Google TTS narration into a finished MP4 — no CapCut timeline editing.
 
-**MVP focus:** image episodes (Zapi batch images + Zenn timeline JSON). Video-clip assembly (CRAVE & CONQUER / Veo3) is planned next.
+**MVP focus:** image episodes (Zenn) and Veo3 clip episodes (CRAVE & CONQUER). Trim `SCENE_XX.mp4` clips to Snow-transcriber timestamps, concat, mux narration.
 
 ## Quick start
 
@@ -145,6 +145,6 @@ The assembler UI shows live **CPU, RAM, and disk** usage from the FFmpeg engine 
 
 - [x] Image assembly MVP (Zenn)
 - [x] MCP server for agents
-- [ ] Video clip trimming (CRAVE & CONQUER / Veo3)
+- [x] Video clip trimming (CRAVE & CONQUER / Veo3)
 - [ ] Music bed + ducking templates
 - [ ] n8n workflow hooks

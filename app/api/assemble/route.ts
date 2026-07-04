@@ -78,7 +78,11 @@ export async function POST(request: Request) {
     const body = await request.json();
     const engineBody =
       "project_dir" in body || "projectDir" in body ? toEngineProjectPayload(body) : body;
-    const response = await fetch(`${ENGINE_URL}/assemble/images/project`, {
+    const assemblePath =
+      engineBody.media_type === "videos"
+        ? "/assemble/videos/project"
+        : "/assemble/images/project";
+    const response = await fetch(`${ENGINE_URL}${assemblePath}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(engineBody),

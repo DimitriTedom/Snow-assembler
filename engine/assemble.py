@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from images import SceneAsset
+from videos import VideoAsset
 
 MotionMode = Literal["none", "ken_burns"]
 
@@ -134,6 +135,90 @@ def mux_audio(
     ]
 
     _run_command(command, "Failed to mux narration audio.")
+
+
+def video_to_clip(
+    ffmpeg: str,
+    asset: VideoAsset,
+    output_path: Path,
+    *,
+    width: int,
+    height: int,
+    fps: int,
+) -> None:
+    duration = asset.scene.duration
+    video_filter = build_scale_filter(width, height, "none", duration, fps)
+
+    command = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(asset.video_path),
+        "-t",
+        f"{duration:.3f}",
+        "-vf",
+        video_filter,
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        str(fps),
+        "-an",
+        str(output_path),
+    ]
+
+    _run_command(command, f"Failed to trim scene {asset.scene.id:02d} ({asset.video_path.name})")
+
+
+def assemble_video_episode(
+    assets: list[VideoAsset],
+    audio_path: Path,
+    output_path: Path,
+    *,
+    width: int = 1920,
+    height: int = 1080,
+    fps: int = 30,
+) -> AssemblyResult:
+    if not assets:
+        raise ValueError("No matched scene videos to assemble.")
+
+    if not audio_path.exists():
+        raise FileNotFoundError(f"Narration audio not found: {audio_path}")
+
+    ffmpeg = ensure_ffmpeg()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="snow-assembler-video-"))
+    clip_paths: list[Path] = []
+
+    try:
+        for asset in assets:
+            clip_path = temp_dir / f"scene_{asset.scene.id:04d}.mp4"
+            video_to_clip(
+                ffmpeg,
+                asset,
+                clip_path,
+                width=width,
+                height=height,
+                fps=fps,
+            )
+            clip_paths.append(clip_path)
+
+        silent_video = temp_dir / "video_only.mp4"
+        concat_clips(ffmpeg, clip_paths, silent_video)
+        mux_audio(ffmpeg, silent_video, audio_path, output_path)
+
+        total_duration = round(sum(asset.scene.duration for asset in assets), 3)
+        return AssemblyResult(
+            output_path=output_path,
+            scene_count=len(assets),
+            total_duration=total_duration,
+            temp_dir=temp_dir,
+        )
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
 
 
 def assemble_image_episode(

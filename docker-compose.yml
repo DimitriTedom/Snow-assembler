@@ -9,6 +9,7 @@ services:
       ASSEMBLER_OUTPUT_DIR: /tmp/snow-assembler-output
     volumes:
       - ${ZENN_DATA_DIR:-C:/Users/Dimitri SnowDev/Documents/Zenn}:/data/zenn:ro
+      - ${CRAVE_VIDEOS_DIR:-D:/SnowDev/Videos/Youtube/CRAVE & CONQUER/Videos}:/data/crave-videos:ro
       - assembler-output:/tmp/snow-assembler-output
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]

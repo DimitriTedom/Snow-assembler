@@ -1,5 +1,6 @@
 export type ImageNaming = "auto" | "timestamp" | "sequential";
 export type MotionMode = "none" | "ken_burns";
+export type MediaType = "images" | "videos";
 export type SceneSource = "snow_transcriber" | "zenn_timeline" | "generic";
 
 export type SceneMatchSummary = {
@@ -20,6 +21,7 @@ export type ValidationResult = {
   missingCount: number;
   unusedImageCount: number;
   imageNaming: ImageNaming;
+  mediaType?: MediaType;
   scenes: SceneMatchSummary[];
   missingScenes: SceneMatchSummary[];
   unusedImages: string[];
@@ -36,6 +38,8 @@ export type ProjectAssemblySettings = {
   projectDir: string;
   scenesJsonPath?: string;
   imagesDir?: string;
+  videosDir?: string;
+  mediaType: MediaType;
   audioPath?: string;
   outputFilename: string;
   imageNaming: ImageNaming;

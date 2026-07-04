@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Download,
   FolderOpen,
+  Film,
   ImageIcon,
   Loader2,
   Music2,
@@ -33,11 +34,25 @@ import type {
   ValidationResult,
 } from "@/lib/assembler/types";
 
-const defaultProjectDir =
+const zennProjectDir =
   "C:/Users/Dimitri SnowDev/Documents/Zenn/episodes/why_you_cant_stop_scrolling";
 
-const defaultSettings: ProjectAssemblySettings = {
-  projectDir: defaultProjectDir,
+const craveProjectDir = "D:/SnowDev/Videos/Youtube/CRAVE & CONQUER/Videos";
+
+const zennSettings: ProjectAssemblySettings = {
+  projectDir: zennProjectDir,
+  mediaType: "images",
+  outputFilename: "assembled.mp4",
+  imageNaming: "sequential",
+  width: 1920,
+  height: 1080,
+  fps: 30,
+  motion: "none",
+};
+
+const craveSettings: ProjectAssemblySettings = {
+  projectDir: craveProjectDir,
+  mediaType: "videos",
   outputFilename: "assembled.mp4",
   imageNaming: "sequential",
   width: 1920,
@@ -62,8 +77,9 @@ function downloadBlob(filename: string, blob: Blob) {
 }
 
 export function AssemblerWorkspace() {
+  const [workflow, setWorkflow] = useState<"zenn" | "crave">("zenn");
   const [mode, setMode] = useState<"project" | "upload">("project");
-  const [settings, setSettings] = useState<ProjectAssemblySettings>(defaultSettings);
+  const [settings, setSettings] = useState<ProjectAssemblySettings>(zennSettings);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [assembly, setAssembly] = useState<AssemblyResult | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -73,10 +89,23 @@ export function AssemblerWorkspace() {
   const [narration, setNarration] = useState<File | null>(null);
   const [images, setImages] = useState<File[]>([]);
 
+  const isVideoWorkflow = settings.mediaType === "videos";
+  const assetLabel = isVideoWorkflow ? "Clip" : "Image";
+
   const isReadyToAssemble = useMemo(() => {
     if (!validation) return false;
     return validation.missingCount === 0 && validation.matchedCount > 0;
   }, [validation]);
+
+  function switchWorkflow(next: "zenn" | "crave") {
+    setWorkflow(next);
+    setSettings(next === "crave" ? craveSettings : zennSettings);
+    setValidation(null);
+    setAssembly(null);
+    if (next === "crave") {
+      setMode("project");
+    }
+  }
 
   async function handleValidateProject() {
     setIsValidating(true);
@@ -244,6 +273,27 @@ export function AssemblerWorkspace() {
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
+          variant={workflow === "zenn" ? "default" : "outline"}
+          className="cursor-pointer"
+          onClick={() => switchWorkflow("zenn")}
+        >
+          <ImageIcon className="mr-2 h-4 w-4" />
+          Zenn images
+        </Button>
+        <Button
+          type="button"
+          variant={workflow === "crave" ? "default" : "outline"}
+          className="cursor-pointer"
+          onClick={() => switchWorkflow("crave")}
+        >
+          <Film className="mr-2 h-4 w-4" />
+          CRAVE Veo3 clips
+        </Button>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
           variant={mode === "project" ? "default" : "outline"}
           className="cursor-pointer"
           onClick={() => setMode("project")}
@@ -270,9 +320,16 @@ export function AssemblerWorkspace() {
             </h2>
             <p className="text-sm text-muted-foreground">
               {mode === "project"
-                ? "Point at a Zenn episode folder with timeline JSON, images/, and TTS audio."
+                ? isVideoWorkflow
+                  ? "Point at your CRAVE folder: snow-transcriber JSON + narration .m4a + SCENE_XX.mp4 clips subfolder."
+                  : "Point at a Zenn episode folder with timeline JSON, images/, and TTS audio."
                 : "Drop scenes JSON, all batch images, and narration. Uploads go directly to the FFmpeg engine (not through Next.js)."}
             </p>
+            {isVideoWorkflow && mode === "upload" ? (
+              <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                Veo3 clip assembly uses <strong>Episode folder</strong> mode — local SCENE_XX.mp4 files on disk.
+              </p>
+            ) : null}
             {mode === "upload" ? (
               <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
                 For full episodes (100+ images), prefer <strong>Episode folder</strong> mode — it reads
@@ -291,52 +348,92 @@ export function AssemblerWorkspace() {
                   onChange={(event) =>
                     setSettings((current) => ({ ...current, projectDir: event.target.value }))
                   }
-                  placeholder={defaultProjectDir}
+                  placeholder={isVideoWorkflow ? craveProjectDir : zennProjectDir}
                 />
                 <p className="text-xs text-muted-foreground">
                   Use your normal Windows folder path above — it auto-maps to{" "}
                   <span className="font-mono text-accent">{toDockerZennPath(settings.projectDir)}</span>{" "}
-                  inside Docker. Keep files in Documents\Zenn on Windows; do not copy them anywhere
-                  else.
+                  inside Docker.
+                  {isVideoWorkflow
+                    ? " Test data: Videos folder with JSON, audio, and episode subfolder."
+                    : " Keep Zenn episodes under Documents\\Zenn on Windows."}
                 </p>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="imagesDir">Images dir (optional)</Label>
-                  <Input
-                    id="imagesDir"
-                    value={settings.imagesDir ?? ""}
-                    onChange={(event) =>
-                      setSettings((current) => ({
-                        ...current,
-                        imagesDir: event.target.value || undefined,
-                      }))
-                    }
-                    placeholder="leave empty — auto-finds images/"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Leave blank. Do not type <code className="text-accent">images/</code> — the engine
-                    auto-discovers the folder inside your project directory.
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="audioPath">Audio path (optional)</Label>
-                  <Input
-                    id="audioPath"
-                    value={settings.audioPath ?? ""}
-                    onChange={(event) =>
-                      setSettings((current) => ({
-                        ...current,
-                        audioPath: event.target.value || undefined,
-                      }))
-                    }
-                    placeholder="leave empty — auto-detect .m4a"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Leave blank unless you have multiple audio files in the folder.
-                  </p>
-                </div>
+                {isVideoWorkflow ? (
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="videosDir">Clips folder (optional)</Label>
+                    <Input
+                      id="videosDir"
+                      value={settings.videosDir ?? ""}
+                      onChange={(event) =>
+                        setSettings((current) => ({
+                          ...current,
+                          videosDir: event.target.value || undefined,
+                        }))
+                      }
+                      placeholder="leave empty — auto-finds CRAVE & CONQUER - EPISODE 01/"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Leave blank. Engine auto-discovers the subfolder with SCENE_01.mp4, SCENE_02.mp4, etc.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="imagesDir">Images dir (optional)</Label>
+                      <Input
+                        id="imagesDir"
+                        value={settings.imagesDir ?? ""}
+                        onChange={(event) =>
+                          setSettings((current) => ({
+                            ...current,
+                            imagesDir: event.target.value || undefined,
+                          }))
+                        }
+                        placeholder="leave empty — auto-finds images/"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Leave blank. Do not type <code className="text-accent">images/</code> — the engine
+                        auto-discovers the folder inside your project directory.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="audioPath">Audio path (optional)</Label>
+                      <Input
+                        id="audioPath"
+                        value={settings.audioPath ?? ""}
+                        onChange={(event) =>
+                          setSettings((current) => ({
+                            ...current,
+                            audioPath: event.target.value || undefined,
+                          }))
+                        }
+                        placeholder="leave empty — auto-detect .m4a"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Leave blank unless you have multiple audio files in the folder.
+                      </p>
+                    </div>
+                  </>
+                )}
+                {isVideoWorkflow ? (
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="audioPathVideo">Audio path (optional)</Label>
+                    <Input
+                      id="audioPathVideo"
+                      value={settings.audioPath ?? ""}
+                      onChange={(event) =>
+                        setSettings((current) => ({
+                          ...current,
+                          audioPath: event.target.value || undefined,
+                        }))
+                      }
+                      placeholder="leave empty — auto-detect .m4a"
+                    />
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : (
@@ -376,39 +473,43 @@ export function AssemblerWorkspace() {
           )}
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="space-y-2">
-              <Label>Image naming</Label>
-              <select
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={settings.imageNaming}
-                onChange={(event) =>
-                  setSettings((current) => ({
-                    ...current,
-                    imageNaming: event.target.value as ImageNaming,
-                  }))
-                }
-              >
-                <option value="auto">Auto detect</option>
-                <option value="timestamp">Timestamp (0000_, 0002_)</option>
-                <option value="sequential">Sequential (SCENE_01)</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label>Motion</Label>
-              <select
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={settings.motion}
-                onChange={(event) =>
-                  setSettings((current) => ({
-                    ...current,
-                    motion: event.target.value as MotionMode,
-                  }))
-                }
-              >
-                <option value="none">Static (Zenn MS Paint)</option>
-                <option value="ken_burns">Ken Burns zoom</option>
-              </select>
-            </div>
+            {!isVideoWorkflow ? (
+              <div className="space-y-2">
+                <Label>Image naming</Label>
+                <select
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={settings.imageNaming}
+                  onChange={(event) =>
+                    setSettings((current) => ({
+                      ...current,
+                      imageNaming: event.target.value as ImageNaming,
+                    }))
+                  }
+                >
+                  <option value="auto">Auto detect</option>
+                  <option value="timestamp">Timestamp (0000_, 0002_)</option>
+                  <option value="sequential">Sequential (SCENE_01)</option>
+                </select>
+              </div>
+            ) : null}
+            {!isVideoWorkflow ? (
+              <div className="space-y-2">
+                <Label>Motion</Label>
+                <select
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={settings.motion}
+                  onChange={(event) =>
+                    setSettings((current) => ({
+                      ...current,
+                      motion: event.target.value as MotionMode,
+                    }))
+                  }
+                >
+                  <option value="none">Static (Zenn MS Paint)</option>
+                  <option value="ken_burns">Ken Burns zoom</option>
+                </select>
+              </div>
+            ) : null}
             <div className="space-y-2">
               <Label htmlFor="fps">FPS</Label>
               <Input
@@ -469,7 +570,11 @@ export function AssemblerWorkspace() {
           {validation ? (
             <>
               <div className="grid gap-3 sm:grid-cols-2">
-                <StatCard label="Scenes" value={String(validation.sceneCount)} icon={ImageIcon} />
+                <StatCard
+                  label="Scenes"
+                  value={String(validation.sceneCount)}
+                  icon={isVideoWorkflow ? Film : ImageIcon}
+                />
                 <StatCard
                   label="Matched"
                   value={`${validation.matchedCount}/${validation.sceneCount}`}
@@ -481,25 +586,41 @@ export function AssemblerWorkspace() {
                   value={formatDuration(validation.totalDuration)}
                   icon={Music2}
                 />
-                <StatCard label="Naming" value={validation.imageNaming} icon={FolderOpen} />
+                <StatCard
+                  label={isVideoWorkflow ? "Media" : "Naming"}
+                  value={isVideoWorkflow ? "Veo3 clips" : validation.imageNaming}
+                  icon={FolderOpen}
+                />
               </div>
 
               <div className="flex flex-wrap gap-2">
                 <Badge variant="secondary">Source: {validation.sceneSource}</Badge>
                 {validation.missingCount > 0 ? (
-                  <Badge variant="warning">{validation.missingCount} missing images</Badge>
+                  <Badge variant="warning">
+                    {validation.missingCount} missing {isVideoWorkflow ? "clips" : "images"}
+                  </Badge>
                 ) : (
                   <Badge variant="success">All scenes matched</Badge>
                 )}
                 {validation.unusedImageCount > 0 ? (
-                  <Badge variant="outline">{validation.unusedImageCount} unused images</Badge>
+                  <Badge variant="outline">
+                    {validation.unusedImageCount} unused {isVideoWorkflow ? "clips" : "images"}
+                  </Badge>
                 ) : null}
               </div>
 
               {validation.missingCount > 0 ? (
-                <SceneMatchTable scenes={validation.missingScenes} title="Missing scenes" />
+                <SceneMatchTable
+                  scenes={validation.missingScenes}
+                  title="Missing scenes"
+                  assetLabel={assetLabel}
+                />
               ) : (
-                <SceneMatchTable scenes={validation.scenes} title="Matched timeline" />
+                <SceneMatchTable
+                  scenes={validation.scenes}
+                  title="Matched timeline"
+                  assetLabel={assetLabel}
+                />
               )}
             </>
           ) : (

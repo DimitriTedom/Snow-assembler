@@ -12,11 +12,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from assemble import AssemblyResult, assemble_image_episode, cleanup_temp_dir, ensure_ffmpeg
+from assemble import (
+    AssemblyResult,
+    assemble_image_episode,
+    assemble_video_episode,
+    cleanup_temp_dir,
+    ensure_ffmpeg,
+)
 from images import ImageNaming, match_scenes_to_images
 from project import discover_images_dir, discover_scenes_json, resolve_project_paths
 from scenes import SceneSource, load_scenes_json, normalize_scenes_payload
 from system import get_system_stats
+from videos import match_scenes_to_videos
+
+MediaType = Literal["images", "videos"]
 
 app = FastAPI(title="Snow Assembler Engine", version="0.1.0")
 
@@ -37,8 +46,10 @@ class ProjectAssemblyRequest(BaseModel):
     project_dir: str
     scenes_json_path: str | None = None
     images_dir: str | None = None
+    videos_dir: str | None = None
     audio_path: str | None = None
     output_filename: str = "assembled.mp4"
+    media_type: MediaType = "images"
     image_naming: ImageNaming = "auto"
     width: int = Field(default=1920, ge=640, le=3840)
     height: int = Field(default=1080, ge=360, le=2160)
@@ -64,6 +75,7 @@ class ValidationResponse(BaseModel):
     missingCount: int
     unusedImageCount: int
     imageNaming: ImageNaming
+    mediaType: MediaType = "images"
     scenes: list[SceneMatchSummary]
     missingScenes: list[SceneMatchSummary]
     unusedImages: list[str]
@@ -128,9 +140,59 @@ def build_validation(
         missingCount=len(validation.missing),
         unusedImageCount=len(validation.unused_images),
         imageNaming=effective_naming,
+        mediaType="images",
         scenes=scene_summaries,
         missingScenes=missing_summaries,
         unusedImages=[path.name for path in validation.unused_images],
+    )
+
+
+def build_video_validation(scenes_json: Path, videos_dir: Path) -> ValidationResponse:
+    scenes, source, _ = load_scenes_json(scenes_json)
+    validation = match_scenes_to_videos(scenes, videos_dir)
+
+    matched_lookup = {asset.scene.id: asset.video_path.name for asset in validation.matched}
+
+    scene_summaries = [
+        SceneMatchSummary(
+            id=scene.id,
+            start=scene.start,
+            end=scene.end,
+            duration=scene.duration,
+            match_key=scene.match_key,
+            image=matched_lookup.get(scene.id),
+            text=scene.text,
+        )
+        for scene in scenes
+    ]
+
+    missing_summaries = [
+        SceneMatchSummary(
+            id=scene.id,
+            start=scene.start,
+            end=scene.end,
+            duration=scene.duration,
+            match_key=scene.match_key,
+            image=None,
+            text=scene.text,
+        )
+        for scene in validation.missing
+    ]
+
+    total_duration = round(sum(scene.duration for scene in scenes), 3)
+
+    return ValidationResponse(
+        sceneSource=source,
+        sceneCount=len(scenes),
+        totalDuration=total_duration,
+        matchedCount=len(validation.matched),
+        missingCount=len(validation.missing),
+        unusedImageCount=len(validation.unused_videos),
+        imageNaming="sequential",
+        mediaType="videos",
+        scenes=scene_summaries,
+        missingScenes=missing_summaries,
+        unusedImages=[path.name for path in validation.unused_videos],
     )
 
 
@@ -158,15 +220,17 @@ def health() -> dict[str, str]:
 def validate_project(request: ProjectAssemblyRequest) -> ValidationResponse:
     try:
         project_dir = Path(request.project_dir)
-        scenes_path, images_path, _, _ = resolve_project_paths(
+        scenes_path, media_path, _, _ = resolve_project_paths(
             project_dir,
             scenes_json_path=Path(request.scenes_json_path) if request.scenes_json_path else None,
             images_dir=request.images_dir,
+            videos_dir=request.videos_dir,
             audio_path=request.audio_path,
             output_filename=request.output_filename,
+            media_type=request.media_type,
         )
 
-        if images_path is None or not images_path.exists():
+        if media_path is None or not media_path.exists():
             scenes, source, _ = load_scenes_json(scenes_path)
             total_duration = round(sum(scene.duration for scene in scenes), 3)
             scene_summaries = [
@@ -189,12 +253,16 @@ def validate_project(request: ProjectAssemblyRequest) -> ValidationResponse:
                 missingCount=len(scenes),
                 unusedImageCount=0,
                 imageNaming=request.image_naming,
+                mediaType=request.media_type,
                 scenes=scene_summaries,
                 missingScenes=scene_summaries,
                 unusedImages=[],
             )
 
-        return build_validation(scenes_path, images_path, request.image_naming)
+        if request.media_type == "videos":
+            return build_video_validation(scenes_path, media_path)
+
+        return build_validation(scenes_path, media_path, request.image_naming)
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
@@ -231,6 +299,53 @@ def assemble_images_project(request: ProjectAssemblyRequest) -> AssemblyResponse
             height=request.height,
             fps=request.fps,
             motion=request.motion,
+        )
+        cleanup_temp_dir(result.temp_dir)
+
+        return AssemblyResponse(
+            sceneSource=source,
+            sceneCount=result.scene_count,
+            totalDuration=result.total_duration,
+            outputPath=str(result.output_path),
+        )
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@app.post("/assemble/videos/project", response_model=AssemblyResponse)
+def assemble_videos_project(request: ProjectAssemblyRequest) -> AssemblyResponse:
+    try:
+        scenes_path, videos_path, audio_path, output_path = resolve_project_paths(
+            Path(request.project_dir),
+            scenes_json_path=Path(request.scenes_json_path) if request.scenes_json_path else None,
+            videos_dir=request.videos_dir,
+            audio_path=request.audio_path,
+            output_filename=request.output_filename,
+            media_type="videos",
+        )
+
+        scenes, source, _ = load_scenes_json(scenes_path)
+        validation = match_scenes_to_videos(scenes, videos_path)
+
+        if validation.missing:
+            missing_ids = ", ".join(f"SCENE_{scene.id:02d}" for scene in validation.missing[:8])
+            suffix = "..." if len(validation.missing) > 8 else ""
+            raise ValueError(
+                f"{len(validation.missing)} scenes are missing video clips "
+                f"({missing_ids}{suffix})."
+            )
+
+        result = assemble_video_episode(
+            validation.matched,
+            audio_path,
+            output_path,
+            width=request.width,
+            height=request.height,
+            fps=request.fps,
         )
         cleanup_temp_dir(result.temp_dir)
 
