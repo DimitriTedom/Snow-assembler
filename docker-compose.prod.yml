@@ -1,0 +1,11 @@
+services:
+  app:
+    image: ${APP_IMAGE:?Set APP_IMAGE}
+    restart: unless-stopped
+    env_file:
+      - ./.env.production
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"

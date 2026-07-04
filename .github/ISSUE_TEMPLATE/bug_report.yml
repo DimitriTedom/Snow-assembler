@@ -1,0 +1,52 @@
+name: Bug report
+description: Report something that isn't working
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug!
+  - type: input
+    id: commit
+    attributes:
+      label: Template version / commit
+      description: Paste `git rev-parse HEAD` (or leave blank).
+      placeholder: fd5d01b...
+    validations:
+      required: false
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Paste any relevant logs (e.g. `npm run build`) or screenshots.
+    validations:
+      required: false
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - Local dev (npm run dev)
+        - CI (GitHub Actions)
+        - Vercel
+        - Docker
+    validations:
+      required: true
