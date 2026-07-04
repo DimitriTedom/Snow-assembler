@@ -133,7 +133,9 @@ npm run mcp:build
 
 **Tools:** `snow_assembler_engine_health`, `snow_assembler_validate_project`, `snow_assembler_assemble_images`
 
-See [mcp-server/MCP_SETUP.md](mcp-server/MCP_SETUP.md) for Grok, Antigravity, VS Code, Cursor, and Claude Desktop setup.
+**In-app guide:** open [/mcp](http://localhost:3000/mcp) for copy-paste configs per client (Grok, Antigravity, VS Code, Cursor, Claude).
+
+See [mcp-server/MCP_SETUP.md](mcp-server/MCP_SETUP.md) for the full markdown reference.
 
 ## System metrics
 

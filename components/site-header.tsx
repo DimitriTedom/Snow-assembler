@@ -20,6 +20,9 @@ export function SiteHeader() {
           <Button asChild variant="ghost" size="sm" className="hidden cursor-pointer sm:inline-flex">
             <Link href="/assembler">Workspace</Link>
           </Button>
+          <Button asChild variant="ghost" size="sm" className="hidden cursor-pointer md:inline-flex">
+            <Link href="/mcp">MCP setup</Link>
+          </Button>
           <Button asChild size="sm" className="cursor-pointer snow-glow">
             <Link href="/assembler" className="flex items-center gap-1.5">
               <Sparkles className="h-3.5 w-3.5" />

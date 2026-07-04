@@ -30,6 +30,8 @@ Uses **stdio** transport → talks to the FFmpeg engine at `http://localhost:800
 
 ## Configure your agent
 
+**UI guide:** run the app and open `/mcp` for interactive setup with copy-paste configs.
+
 See **[MCP_SETUP.md](./MCP_SETUP.md)** for full setup across:
 
 - **Grok** (`~/.grok/config.toml`)

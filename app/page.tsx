@@ -21,6 +21,9 @@ export default function HomePage() {
           <Button asChild className="cursor-pointer snow-glow">
             <Link href="/assembler">Open workspace</Link>
           </Button>
+          <Button asChild variant="outline" className="cursor-pointer">
+            <Link href="/mcp">Connect AI (MCP)</Link>
+          </Button>
         </div>
 
         <div className="mt-10 grid gap-4 sm:grid-cols-3">
