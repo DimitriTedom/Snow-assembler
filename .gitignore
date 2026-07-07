@@ -35,6 +35,7 @@ yarn-error.log*
 engine/test_episode/
 engine/__pycache__/
 **/__pycache__/
+output/
 
 # vercel
 .vercel
