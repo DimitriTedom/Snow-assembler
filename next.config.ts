@@ -137,8 +137,9 @@ const nextConfig: NextConfig = {
     webpackBuildWorker: false,
     // Enable Server Actions
     serverActions: {
-      bodySizeLimit: "2mb",
+      bodySizeLimit: "500mb",
     },
+    middlewareClientMaxBodySize: "500mb",
     optimizePackageImports: ["lucide-react"],
   },
 };

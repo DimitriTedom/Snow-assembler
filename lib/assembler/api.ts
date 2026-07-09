@@ -24,13 +24,18 @@ type EngineProjectBody = {
 };
 
 const ZENN_MARKERS = ["/Documents/Zenn/", "/documents/zenn/"] as const;
-const CRAVE_MARKERS = ["/CRAVE & CONQUER/Videos/", "/crave & conquer/videos/"] as const;
+const CRAVE_VIDEO_MARKERS = ["/CRAVE & CONQUER/Videos/", "/crave & conquer/videos/"] as const;
+const CRAVE_ROOT_MARKERS = ["/CRAVE & CONQUER/", "/crave & conquer/"] as const;
 
 /** Convert a Windows project path to the matching Docker volume mount. */
 export function toDockerZennPath(hostPath: string): string {
   const normalized = hostPath.replace(/\\/g, "/");
 
-  if (normalized.startsWith("/data/zenn/") || normalized.startsWith("/data/crave-videos/")) {
+  if (
+    normalized.startsWith("/data/zenn/") ||
+    normalized.startsWith("/data/crave-videos/") ||
+    normalized.startsWith("/data/crave-root/")
+  ) {
     return normalized;
   }
 
@@ -43,11 +48,19 @@ export function toDockerZennPath(hostPath: string): string {
     }
   }
 
-  for (const marker of CRAVE_MARKERS) {
+  for (const marker of CRAVE_VIDEO_MARKERS) {
     const index = lower.indexOf(marker.toLowerCase());
     if (index !== -1) {
       const suffix = normalized.slice(index + marker.length);
       return `/data/crave-videos/${suffix}`;
+    }
+  }
+
+  for (const marker of CRAVE_ROOT_MARKERS) {
+    const index = lower.indexOf(marker.toLowerCase());
+    if (index !== -1) {
+      const suffix = normalized.slice(index + marker.length);
+      return `/data/crave-root/${suffix}`;
     }
   }
 

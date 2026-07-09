@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
 
 import { toEngineProjectPayload } from "@/lib/assembler/api";
+import { formatEngineFetchError, isAbortError } from "@/lib/assembler/engine-errors";
+import { fetchEngine } from "@/lib/assembler/engine-fetch";
 
 export const runtime = "nodejs";
-
-const ENGINE_URL = process.env.ASSEMBLER_ENGINE_URL ?? "http://localhost:8001";
+export const maxDuration = 3600;
 
 export async function POST(request: Request) {
+  const engineAbort = new AbortController();
+  const onClientAbort = () => engineAbort.abort();
+
+  if (request.signal.aborted) {
+    return NextResponse.json({ error: "Validation cancelled." }, { status: 499 });
+  }
+  request.signal.addEventListener("abort", onClientAbort);
+
   try {
     const contentType = request.headers.get("content-type") ?? "";
 
@@ -40,9 +49,12 @@ export async function POST(request: Request) {
         }
       }
 
-      const response = await fetch(`${ENGINE_URL}/validate/upload`, {
+      const response = await fetchEngine({
+        path: "/validate/upload",
         method: "POST",
         body: engineForm,
+        signal: engineAbort.signal,
+        context: "validate",
       });
       const payload = await response.json();
 
@@ -56,10 +68,13 @@ export async function POST(request: Request) {
     const body = await request.json();
     const engineBody =
       "project_dir" in body || "projectDir" in body ? toEngineProjectPayload(body) : body;
-    const response = await fetch(`${ENGINE_URL}/validate/project`, {
+    const response = await fetchEngine({
+      path: "/validate/project",
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(engineBody),
+      signal: engineAbort.signal,
+      context: "validate",
     });
     const result = await response.json();
 
@@ -69,13 +84,15 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result);
   } catch (error) {
+    if (request.signal.aborted || engineAbort.signal.aborted || isAbortError(error)) {
+      return NextResponse.json({ error: "Validation cancelled." }, { status: 499 });
+    }
+
     const message =
-      error instanceof Error && error.message.includes("fetch failed")
-        ? "Cannot reach assembler engine. Start it with `npm run engine:up`."
-        : error instanceof Error
-          ? error.message
-          : "Unexpected validation error.";
+      error instanceof Error ? error.message : formatEngineFetchError(error, "validate");
 
     return NextResponse.json({ error: message }, { status: 500 });
+  } finally {
+    request.signal.removeEventListener("abort", onClientAbort);
   }
 }

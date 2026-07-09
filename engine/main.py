@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -29,10 +30,23 @@ MediaType = Literal["images", "videos"]
 
 app = FastAPI(title="Snow Assembler Engine", version="0.1.0")
 
-allowed_origins = os.getenv("ENGINE_CORS_ORIGINS", "http://localhost:3000").split(",")
+def _default_cors_origins() -> list[str]:
+    origins: list[str] = []
+    for port in range(3000, 3006):
+        origins.append(f"http://localhost:{port}")
+        origins.append(f"http://127.0.0.1:{port}")
+    return origins
+
+
+_raw_cors = os.getenv("ENGINE_CORS_ORIGINS", "").strip()
+allowed_origins = (
+    [origin.strip() for origin in _raw_cors.split(",") if origin.strip()]
+    if _raw_cors
+    else _default_cors_origins()
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[origin.strip() for origin in allowed_origins if origin.strip()],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,6 +54,21 @@ app.add_middleware(
 
 OUTPUT_ROOT = Path(os.getenv("ASSEMBLER_OUTPUT_DIR", "/tmp/snow-assembler-output"))
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+def resolve_writable_output_path(project_dir: Path, output_filename: str) -> Path:
+    preferred = project_dir / output_filename
+    if os.access(project_dir, os.W_OK):
+        return preferred
+
+    slug = project_dir.name or "episode"
+    parent = project_dir.parent.name
+    if parent and parent not in {".", "/"}:
+        slug = f"{parent}-{slug}"
+
+    out_dir = OUTPUT_ROOT / slug
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir / output_filename
 
 
 class ProjectAssemblyRequest(BaseModel):
@@ -269,45 +298,51 @@ def validate_project(request: ProjectAssemblyRequest) -> ValidationResponse:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
+def _assemble_images_project(request: ProjectAssemblyRequest) -> AssemblyResponse:
+    project_dir = Path(request.project_dir)
+    scenes_path, images_path, audio_path, _ = resolve_project_paths(
+        project_dir,
+        scenes_json_path=Path(request.scenes_json_path) if request.scenes_json_path else None,
+        images_dir=request.images_dir,
+        audio_path=request.audio_path,
+        output_filename=request.output_filename,
+    )
+    output_path = resolve_writable_output_path(project_dir, request.output_filename)
+
+    scenes, source, _ = load_scenes_json(scenes_path)
+    validation = match_scenes_to_images(scenes, images_path, naming=request.image_naming)
+
+    if validation.missing:
+        missing_keys = ", ".join(scene.match_key for scene in validation.missing[:8])
+        suffix = "..." if len(validation.missing) > 8 else ""
+        raise ValueError(
+            f"{len(validation.missing)} scenes are missing images "
+            f"(timestamp keys: {missing_keys}{suffix})."
+        )
+
+    result = assemble_image_episode(
+        validation.matched,
+        audio_path,
+        output_path,
+        width=request.width,
+        height=request.height,
+        fps=request.fps,
+        motion=request.motion,
+    )
+    cleanup_temp_dir(result.temp_dir)
+
+    return AssemblyResponse(
+        sceneSource=source,
+        sceneCount=result.scene_count,
+        totalDuration=result.total_duration,
+        outputPath=str(result.output_path),
+    )
+
+
 @app.post("/assemble/images/project", response_model=AssemblyResponse)
-def assemble_images_project(request: ProjectAssemblyRequest) -> AssemblyResponse:
+async def assemble_images_project(request: ProjectAssemblyRequest) -> AssemblyResponse:
     try:
-        scenes_path, images_path, audio_path, output_path = resolve_project_paths(
-            Path(request.project_dir),
-            scenes_json_path=Path(request.scenes_json_path) if request.scenes_json_path else None,
-            images_dir=request.images_dir,
-            audio_path=request.audio_path,
-            output_filename=request.output_filename,
-        )
-
-        scenes, source, _ = load_scenes_json(scenes_path)
-        validation = match_scenes_to_images(scenes, images_path, naming=request.image_naming)
-
-        if validation.missing:
-            missing_keys = ", ".join(scene.match_key for scene in validation.missing[:8])
-            suffix = "..." if len(validation.missing) > 8 else ""
-            raise ValueError(
-                f"{len(validation.missing)} scenes are missing images "
-                f"(timestamp keys: {missing_keys}{suffix})."
-            )
-
-        result = assemble_image_episode(
-            validation.matched,
-            audio_path,
-            output_path,
-            width=request.width,
-            height=request.height,
-            fps=request.fps,
-            motion=request.motion,
-        )
-        cleanup_temp_dir(result.temp_dir)
-
-        return AssemblyResponse(
-            sceneSource=source,
-            sceneCount=result.scene_count,
-            totalDuration=result.total_duration,
-            outputPath=str(result.output_path),
-        )
+        return await asyncio.to_thread(_assemble_images_project, request)
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
@@ -316,45 +351,51 @@ def assemble_images_project(request: ProjectAssemblyRequest) -> AssemblyResponse
         raise HTTPException(status_code=500, detail=str(error)) from error
 
 
+def _assemble_videos_project(request: ProjectAssemblyRequest) -> AssemblyResponse:
+    project_dir = Path(request.project_dir)
+    scenes_path, videos_path, audio_path, _ = resolve_project_paths(
+        project_dir,
+        scenes_json_path=Path(request.scenes_json_path) if request.scenes_json_path else None,
+        videos_dir=request.videos_dir,
+        audio_path=request.audio_path,
+        output_filename=request.output_filename,
+        media_type="videos",
+    )
+    output_path = resolve_writable_output_path(project_dir, request.output_filename)
+
+    scenes, source, _ = load_scenes_json(scenes_path)
+    validation = match_scenes_to_videos(scenes, videos_path)
+
+    if validation.missing:
+        missing_ids = ", ".join(f"SCENE_{scene.id:02d}" for scene in validation.missing[:8])
+        suffix = "..." if len(validation.missing) > 8 else ""
+        raise ValueError(
+            f"{len(validation.missing)} scenes are missing video clips "
+            f"({missing_ids}{suffix})."
+        )
+
+    result = assemble_video_episode(
+        validation.matched,
+        audio_path,
+        output_path,
+        width=request.width,
+        height=request.height,
+        fps=request.fps,
+    )
+    cleanup_temp_dir(result.temp_dir)
+
+    return AssemblyResponse(
+        sceneSource=source,
+        sceneCount=result.scene_count,
+        totalDuration=result.total_duration,
+        outputPath=str(result.output_path),
+    )
+
+
 @app.post("/assemble/videos/project", response_model=AssemblyResponse)
-def assemble_videos_project(request: ProjectAssemblyRequest) -> AssemblyResponse:
+async def assemble_videos_project(request: ProjectAssemblyRequest) -> AssemblyResponse:
     try:
-        scenes_path, videos_path, audio_path, output_path = resolve_project_paths(
-            Path(request.project_dir),
-            scenes_json_path=Path(request.scenes_json_path) if request.scenes_json_path else None,
-            videos_dir=request.videos_dir,
-            audio_path=request.audio_path,
-            output_filename=request.output_filename,
-            media_type="videos",
-        )
-
-        scenes, source, _ = load_scenes_json(scenes_path)
-        validation = match_scenes_to_videos(scenes, videos_path)
-
-        if validation.missing:
-            missing_ids = ", ".join(f"SCENE_{scene.id:02d}" for scene in validation.missing[:8])
-            suffix = "..." if len(validation.missing) > 8 else ""
-            raise ValueError(
-                f"{len(validation.missing)} scenes are missing video clips "
-                f"({missing_ids}{suffix})."
-            )
-
-        result = assemble_video_episode(
-            validation.matched,
-            audio_path,
-            output_path,
-            width=request.width,
-            height=request.height,
-            fps=request.fps,
-        )
-        cleanup_temp_dir(result.temp_dir)
-
-        return AssemblyResponse(
-            sceneSource=source,
-            sceneCount=result.scene_count,
-            totalDuration=result.total_duration,
-            outputPath=str(result.output_path),
-        )
+        return await asyncio.to_thread(_assemble_videos_project, request)
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
@@ -429,7 +470,8 @@ async def assemble_images_upload(
                 detail=f"{len(validation.missing)} scenes are missing images.",
             )
 
-        result = assemble_image_episode(
+        result = await asyncio.to_thread(
+            assemble_image_episode,
             validation.matched,
             narration_path,
             output_path,

@@ -1,13 +1,21 @@
 import { NextResponse } from "next/server";
 
 import { toEngineProjectPayload } from "@/lib/assembler/api";
+import { formatEngineFetchError, isAbortError } from "@/lib/assembler/engine-errors";
+import { fetchEngine } from "@/lib/assembler/engine-fetch";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
-
-const ENGINE_URL = process.env.ASSEMBLER_ENGINE_URL ?? "http://localhost:8001";
+export const maxDuration = 3600;
 
 export async function POST(request: Request) {
+  const engineAbort = new AbortController();
+  const onClientAbort = () => engineAbort.abort();
+
+  if (request.signal.aborted) {
+    return NextResponse.json({ error: "Assembly cancelled." }, { status: 499 });
+  }
+  request.signal.addEventListener("abort", onClientAbort);
+
   try {
     const contentType = request.headers.get("content-type") ?? "";
 
@@ -50,9 +58,12 @@ export async function POST(request: Request) {
         }
       }
 
-      const response = await fetch(`${ENGINE_URL}/assemble/images/upload`, {
+      const response = await fetchEngine({
+        path: "/assemble/images/upload",
         method: "POST",
         body: engineForm,
+        signal: engineAbort.signal,
+        context: "assemble",
       });
 
       if (!response.ok) {
@@ -82,10 +93,14 @@ export async function POST(request: Request) {
       engineBody.media_type === "videos"
         ? "/assemble/videos/project"
         : "/assemble/images/project";
-    const response = await fetch(`${ENGINE_URL}${assemblePath}`, {
+
+    const response = await fetchEngine({
+      path: assemblePath,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(engineBody),
+      signal: engineAbort.signal,
+      context: "assemble",
     });
     const result = await response.json();
 
@@ -95,13 +110,15 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result);
   } catch (error) {
+    if (request.signal.aborted || engineAbort.signal.aborted || isAbortError(error)) {
+      return NextResponse.json({ error: "Assembly cancelled." }, { status: 499 });
+    }
+
     const message =
-      error instanceof Error && error.message.includes("fetch failed")
-        ? "Cannot reach assembler engine. Start it with `npm run engine:up`."
-        : error instanceof Error
-          ? error.message
-          : "Unexpected assembly error.";
+      error instanceof Error ? error.message : formatEngineFetchError(error, "assemble");
 
     return NextResponse.json({ error: message }, { status: 500 });
+  } finally {
+    request.signal.removeEventListener("abort", onClientAbort);
   }
 }

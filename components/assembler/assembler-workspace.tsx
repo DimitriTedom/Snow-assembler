@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   CheckCircle2,
@@ -12,12 +12,17 @@ import {
   Music2,
   Play,
   Search,
+  Square,
   Upload,
 } from "lucide-react";
 import { toast } from "react-toastify";
 
 import { EngineStatus } from "@/components/assembler/engine-status";
+import { OperationTimer } from "@/components/operation-timer";
 import { SystemMonitor } from "@/components/assembler/system-monitor";
+import { useOperationTimer } from "@/hooks/use-operation-timer";
+import { elapsedSuffix } from "@/lib/format-elapsed";
+import { isAbortError } from "@/lib/assembler/engine-errors";
 import { SceneMatchTable } from "@/components/assembler/scene-match-table";
 import { WorkflowSteps } from "@/components/assembler/workflow-steps";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toDockerZennPath } from "@/lib/assembler/api";
-import { getPublicEngineUrl } from "@/lib/assembler/engine-url";
+import { postAssemblerUpload } from "@/lib/assembler/upload-client";
 import { cn } from "@/lib/utils";
 import type {
   AssemblyResult,
@@ -94,6 +99,8 @@ export function AssemblerWorkspace() {
   const [assembly, setAssembly] = useState<AssemblyResult | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [isAssembling, setIsAssembling] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const assembleTimer = useOperationTimer();
 
   const [scenesJson, setScenesJson] = useState<File | null>(null);
   const [narration, setNarration] = useState<File | null>(null);
@@ -166,19 +173,18 @@ export function AssemblerWorkspace() {
       formData.append("image_naming", settings.imageNaming);
       images.forEach((file) => formData.append("images", file, file.name));
 
-      const response = await fetch(`${getPublicEngineUrl()}/validate/upload`, {
-        method: "POST",
-        body: formData,
-      });
+      const response = await postAssemblerUpload("validate", formData);
       const payload = await response.json();
 
       if (!response.ok) {
         const detail =
-          typeof payload?.detail === "string"
-            ? payload.detail
-            : Array.isArray(payload?.detail)
-              ? payload.detail.map((item: { msg?: string }) => item.msg).join(", ")
-              : "Validation failed.";
+          typeof payload?.error === "string"
+            ? payload.error
+            : typeof payload?.detail === "string"
+              ? payload.detail
+              : Array.isArray(payload?.detail)
+                ? payload.detail.map((item: { msg?: string }) => item.msg).join(", ")
+                : "Validation failed.";
         throw new Error(detail);
       }
 
@@ -191,20 +197,32 @@ export function AssemblerWorkspace() {
     }
   }
 
+  function handleStopAssembly() {
+    abortRef.current?.abort();
+  }
+
   async function handleAssembleProject() {
     if (!isReadyToAssemble) {
       toast.error("Validate scene matching first — all scenes need images.");
       return;
     }
 
+    abortRef.current?.abort();
+    const abortController = new AbortController();
+    abortRef.current = abortController;
+
     setIsAssembling(true);
     setAssembly(null);
+    assembleTimer.start();
+
+    const toastId = toast.loading("FFmpeg is rendering your episode…");
 
     try {
       const response = await fetch("/api/assemble", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
+        signal: abortController.signal,
       });
       const payload = await response.json();
 
@@ -212,15 +230,38 @@ export function AssemblerWorkspace() {
         throw new Error(payload.error ?? "Assembly failed.");
       }
 
+      const elapsedMs = assembleTimer.stop();
       setAssembly(payload as AssemblyResult);
-      toast.success(
-        isVideoWorkflow
-          ? `Rendered ${payload.sceneCount} Veo3 clips → ${payload.outputPath}`
-          : `Rendered ${payload.sceneCount} scenes to ${payload.outputPath}`,
-      );
+      toast.update(toastId, {
+        render:
+          (isVideoWorkflow
+            ? `Rendered ${payload.sceneCount} Veo3 clips → ${payload.outputPath}`
+            : `Rendered ${payload.sceneCount} scenes to ${payload.outputPath}`) + elapsedSuffix(elapsedMs),
+        type: "success",
+        autoClose: 8000,
+        isLoading: false,
+      });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Assembly failed.");
+      const elapsedMs = assembleTimer.stop();
+
+      if (isAbortError(error)) {
+        toast.update(toastId, {
+          render: `Assembly stopped${elapsedSuffix(elapsedMs)}`,
+          type: "info",
+          autoClose: 5000,
+          isLoading: false,
+        });
+        return;
+      }
+
+      toast.update(toastId, {
+        render: `${error instanceof Error ? error.message : "Assembly failed."}${elapsedSuffix(elapsedMs)}`,
+        type: "error",
+        autoClose: 15000,
+        isLoading: false,
+      });
     } finally {
+      abortRef.current = null;
       setIsAssembling(false);
     }
   }
@@ -235,7 +276,14 @@ export function AssemblerWorkspace() {
       return;
     }
 
+    abortRef.current?.abort();
+    const abortController = new AbortController();
+    abortRef.current = abortController;
+
     setIsAssembling(true);
+    assembleTimer.start();
+
+    const toastId = toast.loading("FFmpeg is rendering your episode…");
 
     try {
       const formData = new FormData();
@@ -248,21 +296,20 @@ export function AssemblerWorkspace() {
       formData.append("motion", settings.motion);
       images.forEach((file) => formData.append("images", file, file.name));
 
-      const response = await fetch(`${getPublicEngineUrl()}/assemble/images/upload`, {
-        method: "POST",
-        body: formData,
-      });
+      const response = await postAssemblerUpload("assemble", formData, abortController.signal);
 
       if (!response.ok) {
         let message = "Assembly failed.";
         try {
           const payload = await response.json();
           message =
-            typeof payload?.detail === "string"
-              ? payload.detail
-              : Array.isArray(payload?.detail)
-                ? payload.detail.map((item: { msg?: string }) => item.msg).join(", ")
-                : message;
+            typeof payload?.error === "string"
+              ? payload.error
+              : typeof payload?.detail === "string"
+                ? payload.detail
+                : Array.isArray(payload?.detail)
+                  ? payload.detail.map((item: { msg?: string }) => item.msg).join(", ")
+                  : message;
         } catch {
           message = `Assembly failed (HTTP ${response.status}).`;
         }
@@ -271,10 +318,34 @@ export function AssemblerWorkspace() {
 
       const blob = await response.blob();
       downloadBlob("assembled.mp4", blob);
-      toast.success("Episode assembled — MP4 downloaded.");
+      const elapsedMs = assembleTimer.stop();
+      toast.update(toastId, {
+        render: `Episode assembled — MP4 downloaded${elapsedSuffix(elapsedMs)}`,
+        type: "success",
+        autoClose: 8000,
+        isLoading: false,
+      });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Assembly failed.");
+      const elapsedMs = assembleTimer.stop();
+
+      if (isAbortError(error)) {
+        toast.update(toastId, {
+          render: `Assembly stopped${elapsedSuffix(elapsedMs)}`,
+          type: "info",
+          autoClose: 5000,
+          isLoading: false,
+        });
+        return;
+      }
+
+      toast.update(toastId, {
+        render: `${error instanceof Error ? error.message : "Assembly failed."}${elapsedSuffix(elapsedMs)}`,
+        type: "error",
+        autoClose: 15000,
+        isLoading: false,
+      });
     } finally {
+      abortRef.current = null;
       setIsAssembling(false);
     }
   }
@@ -368,13 +439,35 @@ export function AssemblerWorkspace() {
         ) : null}
       </div>
 
-      {isAssembling && isVideoWorkflow ? (
-        <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-          <p className="font-medium">Rendering Veo3 episode…</p>
-          <p className="mt-1 text-xs text-amber-200/90">
-            FFmpeg is trimming and re-encoding each clip. Large episodes (50+ scenes) can take several
-            minutes — watch CPU/RAM above.
-          </p>
+      {isAssembling ? (
+        <div className="space-y-3 rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-medium">
+                {isVideoWorkflow ? "Rendering Veo3 episode…" : "Assembling image episode…"}
+              </p>
+              <p className="mt-1 text-xs text-amber-200/90">
+                FFmpeg may run for 10+ minutes on long episodes. High CPU is normal — wait for it to finish
+                unless you press Stop. If the UI times out, check `npm run engine:logs` and Snow-assembler/output.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleStopAssembly}
+              className="cursor-pointer shrink-0 border-rose-500/30 text-rose-200 hover:bg-rose-500/10"
+            >
+              <Square className="mr-2 h-4 w-4 fill-current" />
+              Stop
+            </Button>
+          </div>
+          <OperationTimer
+            label="Rendering"
+            elapsedMs={assembleTimer.elapsedMs}
+            active
+            variant="panel"
+            className="border-amber-500/20 bg-black/20 text-amber-50"
+          />
         </div>
       ) : null}
 
@@ -616,6 +709,17 @@ export function AssemblerWorkspace() {
               )}
               Validate matching
             </Button>
+            {isAssembling ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="cursor-pointer border-rose-500/30 text-rose-200 hover:bg-rose-500/10"
+                onClick={handleStopAssembly}
+              >
+                <Square className="mr-2 h-4 w-4 fill-current" />
+                Stop
+              </Button>
+            ) : null}
             <Button
               type="button"
               className="cursor-pointer snow-glow"
@@ -623,11 +727,16 @@ export function AssemblerWorkspace() {
               onClick={mode === "project" ? handleAssembleProject : handleAssembleUpload}
             >
               {isAssembling ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Rendering… {assembleTimer.elapsedLabel}
+                </>
               ) : (
-                <Play className="mr-2 h-4 w-4" />
+                <>
+                  <Play className="mr-2 h-4 w-4" />
+                  {isVideoWorkflow ? "Render video episode" : "Assemble episode"}
+                </>
               )}
-              {isVideoWorkflow ? "Render video episode" : "Assemble episode"}
             </Button>
           </div>
         </section>

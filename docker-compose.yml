@@ -5,18 +5,19 @@ services:
     ports:
       - "8001:8001"
     environment:
-      ENGINE_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      ENGINE_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002,http://localhost:3003,http://127.0.0.1:3003,http://localhost:3004,http://127.0.0.1:3004,http://localhost:3005,http://127.0.0.1:3005
       ASSEMBLER_OUTPUT_DIR: /tmp/snow-assembler-output
     volumes:
       - ${ZENN_DATA_DIR:-C:/Users/Dimitri SnowDev/Documents/Zenn}:/data/zenn:ro
       - ${CRAVE_VIDEOS_DIR:-D:/SnowDev/Videos/Youtube/CRAVE & CONQUER/Videos}:/data/crave-videos:ro
-      - assembler-output:/tmp/snow-assembler-output
+      - ${CRAVE_ROOT_DIR:-D:/SnowDev/Videos/Youtube/CRAVE & CONQUER}:/data/crave-root:ro
+      - ${ASSEMBLER_OUTPUT_HOST_DIR:-D:/SnowDev/Videos/Youtube/CRAVE & CONQUER/Snow-assembler/output}:/tmp/snow-assembler-output
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
 
   app:
     build: .
@@ -32,5 +33,3 @@ services:
       engine:
         condition: service_healthy
 
-volumes:
-  assembler-output:
