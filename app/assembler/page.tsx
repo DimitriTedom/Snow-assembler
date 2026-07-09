@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 
 export const metadata = {
   title: "Workspace",
-  description: "Assemble Zenn image episodes or CRAVE Veo3 clip timelines with FFmpeg.",
+  description: "Assemble image slideshows or video clip timelines with FFmpeg transitions.",
 };
 
 export default function AssemblerPage() {
@@ -23,16 +23,17 @@ export default function AssemblerPage() {
             </Link>
           </Button>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="default">Zenn images</Badge>
-            <Badge variant="secondary">CRAVE Veo3</Badge>
+            <Badge variant="default">Image slideshow</Badge>
+            <Badge variant="secondary">Video clips</Badge>
+            <Badge variant="outline">Transitions</Badge>
             <Badge variant="outline">FFmpeg local</Badge>
           </div>
           <h1 className="text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
             Episode <span className="text-primary">assembler</span>
           </h1>
           <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Pick a workflow below — batch images for Zenn, or Veo3 clips for CRAVE &amp; CONQUER.
-            Validate scene matching, then render a synced MP4 with your narration.
+            Pick a workflow, choose a preset, tune transitions and quality. Validate scene matching,
+            then render a synced MP4 with your narration.
           </p>
           <Button asChild variant="outline" size="sm" className="cursor-pointer">
             <Link href="/mcp" className="flex items-center gap-1.5">

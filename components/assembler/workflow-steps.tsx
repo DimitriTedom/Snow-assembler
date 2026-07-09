@@ -1,47 +1,47 @@
-import { Clapperboard, FileJson, Film, ImageIcon, Music2 } from "lucide-react";
+import { Clapperboard, FileJson, Film, ImageIcon, Music2, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-export type WorkflowVariant = "zenn" | "crave" | "all";
+export type WorkflowVariant = "slideshow" | "video-clips" | "all";
 
-const zennSteps = [
+const slideshowSteps = [
   {
     icon: ImageIcon,
-    title: "Batch images",
-    description: "Zapi exports with timestamp prefixes (0000_, 0002_…) or SCENE_XX naming.",
+    title: "Scene images",
+    description: "Batch stills with sequential (SCENE_01) or timestamp (0000_) prefixes.",
   },
   {
     icon: FileJson,
-    title: "Scene JSON",
-    description: "Snow-transcriber export or Zenn episode timeline with exact durations.",
+    title: "Timeline JSON",
+    description: "Scene durations from any transcriber export or custom timeline file.",
   },
   {
-    icon: Clapperboard,
-    title: "Auto assemble",
-    description: "Trim each still to its timestamp, concat, mux Google TTS narration.",
+    icon: Sparkles,
+    title: "Assemble",
+    description: "Trim each still, apply transitions, and mux narration audio.",
   },
 ];
 
-const craveSteps = [
+const videoClipSteps = [
   {
     icon: Film,
-    title: "Veo3 clips",
-    description: "SCENE_01.mp4 … SCENE_XX.mp4 in an episode subfolder (one clip per scene).",
+    title: "Scene clips",
+    description: "One video file per scene (SCENE_01.mp4, clip_01.mp4, etc.).",
   },
   {
     icon: FileJson,
-    title: "Transcriber JSON",
-    description: "snow-transcriber-agent.json with fixed or pause-based scene timestamps.",
+    title: "Timeline JSON",
+    description: "Scene timestamps that define how long each clip stays on screen.",
   },
   {
     icon: Music2,
-    title: "Mux & render",
-    description: "Trim each clip to scene duration, concat timeline, lay voiceover underneath.",
+    title: "Render",
+    description: "Trim clips, crossfade optional, mux voiceover underneath.",
   },
 ];
 
 export function WorkflowSteps({
-  variant = "zenn",
+  variant = "slideshow",
   compact = false,
 }: {
   variant?: WorkflowVariant;
@@ -50,13 +50,13 @@ export function WorkflowSteps({
   if (variant === "all") {
     return (
       <div className="grid gap-6 lg:grid-cols-2">
-        <WorkflowGroup label="Zenn / SnowAgeBrain" steps={zennSteps} compact={compact} />
-        <WorkflowGroup label="CRAVE & CONQUER / Veo3" steps={craveSteps} compact={compact} />
+        <WorkflowGroup label="Image slideshow" steps={slideshowSteps} compact={compact} />
+        <WorkflowGroup label="Video clips" steps={videoClipSteps} compact={compact} />
       </div>
     );
   }
 
-  const steps = variant === "crave" ? craveSteps : zennSteps;
+  const steps = variant === "video-clips" ? videoClipSteps : slideshowSteps;
   return <WorkflowGroup steps={steps} compact={compact} />;
 }
 
@@ -66,7 +66,7 @@ function WorkflowGroup({
   compact,
 }: {
   label?: string;
-  steps: typeof zennSteps;
+  steps: typeof slideshowSteps;
   compact?: boolean;
 }) {
   return (
@@ -78,20 +78,16 @@ function WorkflowGroup({
         {steps.map((step, index) => (
           <div
             key={step.title}
-            className="group cursor-default rounded-xl border border-white/8 bg-secondary/40 p-4 transition-colors duration-200 hover:border-primary/25 hover:bg-secondary/70"
+            className="rounded-xl border border-white/8 bg-secondary/30 p-4 backdrop-blur-sm"
           >
-            <div className="flex items-start gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary transition-colors group-hover:bg-primary/25">
-                <step.icon className="h-4 w-4" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs text-accent">0{index + 1}</span>
-                  <h3 className="text-sm font-semibold">{step.title}</h3>
-                </div>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{step.description}</p>
-              </div>
+            <div className="mb-3 flex items-center gap-2">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 font-mono text-xs text-primary">
+                {index + 1}
+              </span>
+              <step.icon className="h-4 w-4 text-accent" />
+              <p className="text-sm font-medium">{step.title}</p>
             </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">{step.description}</p>
           </div>
         ))}
       </div>

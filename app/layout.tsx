@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     default: "Snow Assembler",
     template: "%s | Snow Assembler",
   },
-  description: "Automated episode assembly for Zenn images and CRAVE & CONQUER Veo3 clips.",
+  description: "Open-source FFmpeg assembler for timestamp-synced image slideshows and video clip episodes.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

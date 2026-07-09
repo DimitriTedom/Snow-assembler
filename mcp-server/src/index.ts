@@ -9,7 +9,7 @@ import {
   assembleImagesProject,
   checkEngineHealth,
   getEngineUrl,
-  toDockerZennPath,
+  toDockerProjectPath,
   validateProject,
 } from "./client.js";
 import { previewMatchedScenes, summarizeAssembly, summarizeValidation } from "./format.js";
@@ -24,12 +24,12 @@ function textResult(text: string, structured?: Record<string, unknown>) {
 
 function resolveProjectDir(projectDir: string, useDockerPaths: boolean): string {
   const absolute = resolve(projectDir);
-  return useDockerPaths ? toDockerZennPath(absolute) : absolute.replace(/\\/g, "/");
+  return useDockerPaths ? toDockerProjectPath(absolute) : absolute.replace(/\\/g, "/");
 }
 
 const server = new McpServer({
   name: "snow-assembler-mcp-server",
-  version: "0.1.0",
+  version: "0.2.0",
 });
 
 server.registerResource(
@@ -37,7 +37,7 @@ server.registerResource(
   "snow://assembler/workflow/guide",
   {
     title: "Snow Assembler Agent Workflow",
-    description: "Step-by-step guide for AI agents assembling Zenn image episodes",
+    description: "Step-by-step guide for AI agents assembling timestamp-synced episodes",
     mimeType: "text/markdown",
   },
   async () => ({
@@ -77,18 +77,20 @@ const projectSchema = z
       .string()
       .min(1)
       .describe(
-        "Absolute path to episode folder. Use /data/zenn/episodes/... when engine runs in Docker.",
+        "Absolute path to episode folder. Use /data/projects/... when engine runs in Docker.",
       ),
     use_docker_paths: z
       .boolean()
       .default(true)
       .describe(
-        "Convert Windows Documents/Zenn paths to Docker mount /data/zenn/... (default true)",
+        "Convert Windows host paths under PROJECT_DATA_DIR to Docker mount /data/projects/... (default true)",
       ),
     scenes_json_path: z.string().optional().describe("Optional override path to scenes JSON"),
     images_dir: z.string().optional().describe("Optional override path to images directory"),
+    videos_dir: z.string().optional().describe("Optional override path to video clips directory"),
     audio_path: z.string().optional().describe("Optional override path to narration audio"),
     output_filename: z.string().default("assembled.mp4").describe("Output MP4 filename"),
+    media_type: z.enum(["images", "videos"]).default("images").describe("Image slideshow or video clips"),
     image_naming: z
       .enum(["auto", "timestamp", "sequential"])
       .default("auto")
@@ -97,15 +99,28 @@ const projectSchema = z
     height: z.number().int().min(360).max(2160).default(1080),
     fps: z.number().int().min(24).max(60).default(30),
     motion: z.enum(["none", "ken_burns"]).default("none").describe("Static or subtle Ken Burns zoom"),
+    transition: z
+      .enum(["none", "crossfade", "fade_black", "wipe_left", "slide_left"])
+      .default("none")
+      .describe("Scene transition style"),
+    transition_duration: z.number().min(0.1).max(2).default(0.4).describe("Transition length in seconds"),
+    quality: z.enum(["draft", "standard", "high"]).default("standard"),
+    export_captions: z.boolean().default(false).describe("Write .srt captions alongside MP4"),
+    scene_range_start: z.number().int().min(1).optional(),
+    scene_range_end: z.number().int().min(1).optional(),
+    preset_id: z
+      .string()
+      .optional()
+      .describe("slideshow-static, slideshow-ken-burns, video-clips-smooth, etc."),
   })
   .strict();
 
 server.registerTool(
   "snow_assembler_validate_project",
   {
-    title: "Validate Episode Image Matching",
+    title: "Validate Episode Asset Matching",
     description:
-      "Validate that batch images match scene timestamps in a Zenn timeline or Snow-transcriber JSON. Run before assembly.",
+      "Validate that batch images or video clips match scene timestamps in a timeline or transcriber JSON.",
     inputSchema: projectSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   },
@@ -115,13 +130,22 @@ server.registerTool(
       project_dir: projectDir,
       scenes_json_path: input.scenes_json_path,
       images_dir: input.images_dir,
+      videos_dir: input.videos_dir,
       audio_path: input.audio_path,
       output_filename: input.output_filename,
+      media_type: input.media_type,
       image_naming: input.image_naming,
       width: input.width,
       height: input.height,
       fps: input.fps,
       motion: input.motion,
+      transition: input.transition,
+      transition_duration: input.transition_duration,
+      quality: input.quality,
+      export_captions: input.export_captions,
+      scene_range_start: input.scene_range_start,
+      scene_range_end: input.scene_range_end,
+      preset_id: input.preset_id,
     });
 
     const summary = summarizeValidation(result, projectDir);
@@ -139,7 +163,7 @@ server.registerTool(
   {
     title: "Assemble Image Episode to MP4",
     description:
-      "Render a full episode MP4 from timestamped stills + narration audio. Requires all scenes matched.",
+      "Render a full slideshow MP4 from timestamped stills + narration audio. Requires all scenes matched.",
     inputSchema: projectSchema,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   },
@@ -151,6 +175,7 @@ server.registerTool(
       scenes_json_path: input.scenes_json_path,
       images_dir: input.images_dir,
       audio_path: input.audio_path,
+      media_type: "images",
       image_naming: input.image_naming,
     });
 
@@ -166,11 +191,19 @@ server.registerTool(
       images_dir: input.images_dir,
       audio_path: input.audio_path,
       output_filename: input.output_filename,
+      media_type: "images",
       image_naming: input.image_naming,
       width: input.width,
       height: input.height,
       fps: input.fps,
       motion: input.motion,
+      transition: input.transition,
+      transition_duration: input.transition_duration,
+      quality: input.quality,
+      export_captions: input.export_captions,
+      scene_range_start: input.scene_range_start,
+      scene_range_end: input.scene_range_end,
+      preset_id: input.preset_id,
     });
 
     const summary = summarizeAssembly(result, projectDir);

@@ -12,6 +12,7 @@ import {
   Music2,
   Play,
   Search,
+  Sparkles,
   Square,
   Upload,
 } from "lucide-react";
@@ -29,48 +30,88 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { toDockerZennPath } from "@/lib/assembler/api";
+import { toDockerProjectPath } from "@/lib/assembler/api";
+import { normalizeOutputFilename } from "@/lib/assembler/filename";
+import { startAssemblyJob, waitForAssemblyJob } from "@/lib/assembler/jobs";
+import {
+  DEFAULT_PRESETS,
+  applyPresetToSettings,
+  parseWorkflowParam,
+} from "@/lib/assembler/presets";
 import { postAssemblerUpload } from "@/lib/assembler/upload-client";
 import { cn } from "@/lib/utils";
 import type {
+  AssemblyJob,
   AssemblyResult,
   ImageNaming,
   MotionMode,
   ProjectAssemblySettings,
+  QualityPreset,
+  TransitionMode,
   ValidationResult,
+  WorkflowMode,
 } from "@/lib/assembler/types";
 
-const zennProjectDir =
-  "C:/Users/Dimitri SnowDev/Documents/Zenn/episodes/why_you_cant_stop_scrolling";
+const TRANSITION_OPTIONS: { value: TransitionMode; label: string }[] = [
+  { value: "none", label: "Hard cut" },
+  { value: "crossfade", label: "Crossfade" },
+  { value: "fade_black", label: "Fade to black" },
+  { value: "wipe_left", label: "Wipe left" },
+  { value: "slide_left", label: "Slide left" },
+];
 
-const craveProjectDir = "D:/SnowDev/Videos/Youtube/CRAVE & CONQUER/Videos";
+const QUALITY_OPTIONS: { value: QualityPreset; label: string }[] = [
+  { value: "draft", label: "Draft (fast)" },
+  { value: "standard", label: "Standard" },
+  { value: "high", label: "High" },
+];
 
-const zennSettings: ProjectAssemblySettings = {
-  projectDir: zennProjectDir,
-  mediaType: "images",
-  outputFilename: "assembled.mp4",
-  imageNaming: "sequential",
-  width: 1920,
-  height: 1080,
-  fps: 30,
-  motion: "none",
-};
+function createSettingsForWorkflow(workflow: WorkflowMode): ProjectAssemblySettings {
+  const preset =
+    workflow === "video-clips"
+      ? DEFAULT_PRESETS.find((entry) => entry.id === "video-clips-standard")!
+      : DEFAULT_PRESETS.find((entry) => entry.id === "slideshow-static")!;
 
-const craveSettings: ProjectAssemblySettings = {
-  projectDir: craveProjectDir,
-  mediaType: "videos",
-  outputFilename: "assembled.mp4",
-  imageNaming: "sequential",
-  width: 1920,
-  height: 1080,
-  fps: 30,
-  motion: "none",
-};
+  return applyPresetToSettings(
+    {
+      projectDir: "",
+      outputFilename: "assembled.mp4",
+      width: 1920,
+      height: 1080,
+      exportCaptions: false,
+      mediaType: workflow === "video-clips" ? "videos" : "images",
+      imageNaming: "sequential",
+      motion: "none",
+      transition: "none",
+      transitionDuration: 0.4,
+      quality: "standard",
+      fps: 30,
+    },
+    preset,
+  );
+}
 
 function formatDuration(seconds: number) {
   const minutes = Math.floor(seconds / 60);
   const remainder = (seconds % 60).toFixed(1);
   return `${minutes}m ${remainder}s`;
+}
+
+function formatPhase(phase: string) {
+  switch (phase) {
+    case "rendering_clips":
+      return "Rendering scenes";
+    case "concatenating":
+      return "Applying transitions";
+    case "muxing_audio":
+      return "Muxing narration";
+    case "starting":
+      return "Starting";
+    case "done":
+      return "Complete";
+    default:
+      return phase.replace(/_/g, " ");
+  }
 }
 
 function downloadBlob(filename: string, blob: Blob) {
@@ -84,19 +125,16 @@ function downloadBlob(filename: string, blob: Blob) {
 
 export function AssemblerWorkspace() {
   const searchParams = useSearchParams();
-  const workflowFromUrl = searchParams.get("workflow");
+  const workflowFromUrl = parseWorkflowParam(searchParams.get("workflow"));
 
-  const [workflow, setWorkflow] = useState<"zenn" | "crave">(() =>
-    workflowFromUrl === "crave" ? "crave" : "zenn",
-  );
-  const [mode, setMode] = useState<"project" | "upload">(() =>
-    workflowFromUrl === "crave" ? "project" : "project",
-  );
+  const [workflow, setWorkflow] = useState<WorkflowMode>(workflowFromUrl);
+  const [mode, setMode] = useState<"project" | "upload">("project");
   const [settings, setSettings] = useState<ProjectAssemblySettings>(() =>
-    workflowFromUrl === "crave" ? craveSettings : zennSettings,
+    createSettingsForWorkflow(workflowFromUrl),
   );
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [assembly, setAssembly] = useState<AssemblyResult | null>(null);
+  const [job, setJob] = useState<AssemblyJob | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [isAssembling, setIsAssembling] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -109,25 +147,49 @@ export function AssemblerWorkspace() {
   const isVideoWorkflow = settings.mediaType === "videos";
   const assetLabel = isVideoWorkflow ? "Clip" : "Image";
 
+  const workflowPresets = useMemo(
+    () =>
+      DEFAULT_PRESETS.filter((preset) =>
+        isVideoWorkflow ? preset.mediaType === "videos" : preset.mediaType === "images",
+      ),
+    [isVideoWorkflow],
+  );
+
   const isReadyToAssemble = useMemo(() => {
     if (!validation) return false;
     return validation.missingCount === 0 && validation.matchedCount > 0;
   }, [validation]);
 
-  function switchWorkflow(next: "zenn" | "crave") {
+  function switchWorkflow(next: WorkflowMode) {
     setWorkflow(next);
-    setSettings(next === "crave" ? craveSettings : zennSettings);
+    setSettings(createSettingsForWorkflow(next));
     setValidation(null);
     setAssembly(null);
-    if (next === "crave") {
+    setJob(null);
+    if (next === "video-clips") {
       setMode("project");
     }
   }
 
+  function applyPreset(presetId: string) {
+    const preset = DEFAULT_PRESETS.find((entry) => entry.id === presetId);
+    if (!preset) return;
+    setSettings((current) => applyPresetToSettings(current, preset));
+    setValidation(null);
+    setAssembly(null);
+    setJob(null);
+  }
+
   async function handleValidateProject() {
+    if (!settings.projectDir.trim()) {
+      toast.error("Enter your episode folder path first.");
+      return;
+    }
+
     setIsValidating(true);
     setValidation(null);
     setAssembly(null);
+    setJob(null);
 
     try {
       const response = await fetch("/api/validate", {
@@ -166,6 +228,7 @@ export function AssemblerWorkspace() {
     setIsValidating(true);
     setValidation(null);
     setAssembly(null);
+    setJob(null);
 
     try {
       const formData = new FormData();
@@ -203,7 +266,7 @@ export function AssemblerWorkspace() {
 
   async function handleAssembleProject() {
     if (!isReadyToAssemble) {
-      toast.error("Validate scene matching first — all scenes need images.");
+      toast.error("Validate scene matching first — all scenes need matching assets.");
       return;
     }
 
@@ -213,34 +276,37 @@ export function AssemblerWorkspace() {
 
     setIsAssembling(true);
     setAssembly(null);
+    setJob(null);
     assembleTimer.start();
 
     const toastId = toast.loading("FFmpeg is rendering your episode…");
 
     try {
-      const response = await fetch("/api/assemble", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
-        signal: abortController.signal,
-      });
-      const payload = await response.json();
+      const started = await startAssemblyJob(settings, abortController.signal);
+      setJob(started);
 
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Assembly failed.");
-      }
+      const completed = await waitForAssemblyJob(started.jobId, {
+        signal: abortController.signal,
+        onUpdate: (update) => setJob(update),
+      });
 
       const elapsedMs = assembleTimer.stop();
-      setAssembly(payload as AssemblyResult);
-      toast.update(toastId, {
-        render:
-          (isVideoWorkflow
-            ? `Rendered ${payload.sceneCount} Veo3 clips → ${payload.outputPath}`
-            : `Rendered ${payload.sceneCount} scenes to ${payload.outputPath}`) + elapsedSuffix(elapsedMs),
-        type: "success",
-        autoClose: 8000,
-        isLoading: false,
-      });
+
+      if (completed.result) {
+        setAssembly(completed.result);
+        toast.update(toastId, {
+          render:
+            (isVideoWorkflow
+              ? `Rendered ${completed.result.sceneCount} clips → ${completed.result.outputPath}`
+              : `Rendered ${completed.result.sceneCount} scenes to ${completed.result.outputPath}`) +
+            elapsedSuffix(elapsedMs),
+          type: "success",
+          autoClose: 8000,
+          isLoading: false,
+        });
+      } else {
+        throw new Error(completed.error ?? "Assembly completed without a result.");
+      }
     } catch (error) {
       const elapsedMs = assembleTimer.stop();
 
@@ -294,6 +360,11 @@ export function AssemblerWorkspace() {
       formData.append("height", String(settings.height));
       formData.append("fps", String(settings.fps));
       formData.append("motion", settings.motion);
+      formData.append("transition", settings.transition);
+      formData.append("transition_duration", String(settings.transitionDuration));
+      formData.append("quality", settings.quality);
+      formData.append("export_captions", String(settings.exportCaptions));
+      formData.append("output_filename", normalizeOutputFilename(settings.outputFilename));
       images.forEach((file) => formData.append("images", file, file.name));
 
       const response = await postAssemblerUpload("assemble", formData, abortController.signal);
@@ -316,8 +387,11 @@ export function AssemblerWorkspace() {
         throw new Error(message);
       }
 
+      const outputFilename =
+        response.headers.get("X-Snow-Output-Filename") ??
+        normalizeOutputFilename(settings.outputFilename);
       const blob = await response.blob();
-      downloadBlob("assembled.mp4", blob);
+      downloadBlob(outputFilename, blob);
       const elapsedMs = assembleTimer.stop();
       toast.update(toastId, {
         render: `Episode assembled — MP4 downloaded${elapsedSuffix(elapsedMs)}`,
@@ -350,6 +424,9 @@ export function AssemblerWorkspace() {
     }
   }
 
+  const progressPercent = job?.progress ?? 0;
+  const showProgress = isAssembling && mode === "project" && job && job.status === "running";
+
   return (
     <div className="space-y-8">
       <EngineStatus />
@@ -366,30 +443,18 @@ export function AssemblerWorkspace() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-medium">
-              {isVideoWorkflow ? "CRAVE & CONQUER · Veo3 clips" : "Zenn · batch images"}
+              {isVideoWorkflow ? "Video clips workflow" : "Image slideshow workflow"}
             </p>
             <p className="mt-0.5 text-xs text-muted-foreground">
               {isVideoWorkflow
-                ? "snow-transcriber-agent.json + .m4a + SCENE_XX.mp4 folder"
-                : "timeline JSON + images/ + TTS audio"}
+                ? "Timeline JSON + narration audio + one clip per scene"
+                : "Timeline JSON + batch images + narration audio"}
             </p>
           </div>
-          {isVideoWorkflow ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="cursor-pointer text-xs"
-              onClick={() => {
-                setSettings(craveSettings);
-                setValidation(null);
-                setAssembly(null);
-                toast.info("Loaded CRAVE test folder path.");
-              }}
-            >
-              Load test episode
-            </Button>
-          ) : null}
+          <Badge variant="outline" className="gap-1">
+            <Sparkles className="h-3 w-3" />
+            {settings.transition === "none" ? "Hard cuts" : settings.transition.replace(/_/g, " ")}
+          </Badge>
         </div>
       </div>
 
@@ -398,21 +463,21 @@ export function AssemblerWorkspace() {
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
-          variant={workflow === "zenn" ? "default" : "outline"}
+          variant={workflow === "slideshow" ? "default" : "outline"}
           className="cursor-pointer"
-          onClick={() => switchWorkflow("zenn")}
+          onClick={() => switchWorkflow("slideshow")}
         >
           <ImageIcon className="mr-2 h-4 w-4" />
-          Zenn images
+          Image slideshow
         </Button>
         <Button
           type="button"
-          variant={workflow === "crave" ? "default" : "outline"}
+          variant={workflow === "video-clips" ? "default" : "outline"}
           className="cursor-pointer"
-          onClick={() => switchWorkflow("crave")}
+          onClick={() => switchWorkflow("video-clips")}
         >
           <Film className="mr-2 h-4 w-4" />
-          CRAVE Veo3 clips
+          Video clips
         </Button>
       </div>
 
@@ -444,11 +509,12 @@ export function AssemblerWorkspace() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="font-medium">
-                {isVideoWorkflow ? "Rendering Veo3 episode…" : "Assembling image episode…"}
+                {isVideoWorkflow ? "Rendering video episode…" : "Assembling slideshow…"}
               </p>
               <p className="mt-1 text-xs text-amber-200/90">
-                FFmpeg may run for 10+ minutes on long episodes. High CPU is normal — wait for it to finish
-                unless you press Stop. If the UI times out, check `npm run engine:logs` and Snow-assembler/output.
+                {showProgress && job
+                  ? `${formatPhase(job.phase)} — scene ${job.currentScene}/${job.totalScenes}`
+                  : "FFmpeg may run for 10+ minutes on long episodes. High CPU is normal."}
               </p>
             </div>
             <Button
@@ -461,6 +527,19 @@ export function AssemblerWorkspace() {
               Stop
             </Button>
           </div>
+
+          {showProgress ? (
+            <div className="space-y-1">
+              <div className="h-2 overflow-hidden rounded-full bg-black/30">
+                <div
+                  className="h-full rounded-full bg-amber-400 transition-all duration-500"
+                  style={{ width: `${Math.min(100, progressPercent)}%` }}
+                />
+              </div>
+              <p className="text-xs text-amber-200/80">{Math.round(progressPercent)}% complete</p>
+            </div>
+          ) : null}
+
           <OperationTimer
             label="Rendering"
             elapsedMs={assembleTimer.elapsedMs}
@@ -480,21 +559,41 @@ export function AssemblerWorkspace() {
             <p className="text-sm text-muted-foreground">
               {mode === "project"
                 ? isVideoWorkflow
-                  ? "Point at your CRAVE folder: snow-transcriber JSON + narration .m4a + SCENE_XX.mp4 clips subfolder."
-                  : "Point at a Zenn episode folder with timeline JSON, images/, and TTS audio."
-                : "Drop scenes JSON, all batch images, and narration. Uploads go directly to the FFmpeg engine (not through Next.js)."}
+                  ? "Point at a folder with timeline JSON, narration audio, and scene clips."
+                  : "Point at a folder with timeline JSON, images/, and narration audio."
+                : "Drop scenes JSON, batch images, and narration. Best for quick tests."}
             </p>
             {isVideoWorkflow && mode === "upload" ? (
               <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                Veo3 clip assembly uses <strong>Episode folder</strong> mode — local SCENE_XX.mp4 files on disk.
+                Video clip assembly uses <strong>Episode folder</strong> mode — local clip files on disk.
               </p>
             ) : null}
             {!isVideoWorkflow && mode === "upload" ? (
               <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
                 For full episodes (100+ images), prefer <strong>Episode folder</strong> mode — it reads
-                files from disk and is much faster. Upload mode is best for quick tests.
+                files from disk and is much faster.
               </p>
             ) : null}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="preset">Assembly preset</Label>
+            <select
+              id="preset"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={settings.presetId ?? workflowPresets[0]?.id ?? ""}
+              onChange={(event) => applyPreset(event.target.value)}
+            >
+              {workflowPresets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              {workflowPresets.find((p) => p.id === settings.presetId)?.description ??
+                "Choose a starting point — you can tweak transitions below."}
+            </p>
           </div>
 
           {mode === "project" ? (
@@ -507,16 +606,20 @@ export function AssemblerWorkspace() {
                   onChange={(event) =>
                     setSettings((current) => ({ ...current, projectDir: event.target.value }))
                   }
-                  placeholder={isVideoWorkflow ? craveProjectDir : zennProjectDir}
+                  placeholder="D:/Videos/my-episode"
                 />
-                <p className="text-xs text-muted-foreground">
-                  Use your normal Windows folder path above — it auto-maps to{" "}
-                  <span className="font-mono text-accent">{toDockerZennPath(settings.projectDir)}</span>{" "}
-                  inside Docker.
-                  {isVideoWorkflow
-                    ? " Test data: Videos folder with JSON, audio, and episode subfolder."
-                    : " Keep Zenn episodes under Documents\\Zenn on Windows."}
-                </p>
+                {settings.projectDir.trim() ? (
+                  <p className="text-xs text-muted-foreground">
+                    Docker path:{" "}
+                    <span className="font-mono text-accent">
+                      {toDockerProjectPath(settings.projectDir)}
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Set PROJECT_DATA_DIR in .env so your host folder maps to /data/projects in Docker.
+                  </p>
+                )}
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -532,11 +635,8 @@ export function AssemblerWorkspace() {
                           videosDir: event.target.value || undefined,
                         }))
                       }
-                      placeholder="leave empty — auto-finds CRAVE & CONQUER - EPISODE 01/"
+                      placeholder="leave empty — auto-discovers clips/"
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Leave blank. Engine auto-discovers the subfolder with SCENE_01.mp4, SCENE_02.mp4, etc.
-                    </p>
                   </div>
                 ) : (
                   <>
@@ -553,10 +653,6 @@ export function AssemblerWorkspace() {
                         }
                         placeholder="leave empty — auto-finds images/"
                       />
-                      <p className="text-xs text-muted-foreground">
-                        Leave blank. Do not type <code className="text-accent">images/</code> — the engine
-                        auto-discovers the folder inside your project directory.
-                      </p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="audioPath">Audio path (optional)</Label>
@@ -571,9 +667,6 @@ export function AssemblerWorkspace() {
                         }
                         placeholder="leave empty — auto-detect .m4a"
                       />
-                      <p className="text-xs text-muted-foreground">
-                        Leave blank unless you have multiple audio files in the folder.
-                      </p>
                     </div>
                   </>
                 )}
@@ -631,7 +724,68 @@ export function AssemblerWorkspace() {
             </div>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
+              <Label>Transition</Label>
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={settings.transition}
+                onChange={(event) =>
+                  setSettings((current) => ({
+                    ...current,
+                    transition: event.target.value as TransitionMode,
+                    presetId: undefined,
+                  }))
+                }
+              >
+                {TRANSITION_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="transitionDuration">
+                Transition duration ({settings.transitionDuration.toFixed(1)}s)
+              </Label>
+              <Input
+                id="transitionDuration"
+                type="range"
+                min={0.1}
+                max={2}
+                step={0.05}
+                value={settings.transitionDuration}
+                disabled={settings.transition === "none"}
+                onChange={(event) =>
+                  setSettings((current) => ({
+                    ...current,
+                    transitionDuration: Number(event.target.value),
+                    presetId: undefined,
+                  }))
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Quality</Label>
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={settings.quality}
+                onChange={(event) =>
+                  setSettings((current) => ({
+                    ...current,
+                    quality: event.target.value as QualityPreset,
+                    presetId: undefined,
+                  }))
+                }
+              >
+                {QUALITY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
             {!isVideoWorkflow ? (
               <div className="space-y-2">
                 <Label>Image naming</Label>
@@ -661,10 +815,11 @@ export function AssemblerWorkspace() {
                     setSettings((current) => ({
                       ...current,
                       motion: event.target.value as MotionMode,
+                      presetId: undefined,
                     }))
                   }
                 >
-                  <option value="none">Static (Zenn MS Paint)</option>
+                  <option value="none">Static</option>
                   <option value="ken_burns">Ken Burns zoom</option>
                 </select>
               </div>
@@ -690,7 +845,60 @@ export function AssemblerWorkspace() {
                 onChange={(event) =>
                   setSettings((current) => ({ ...current, outputFilename: event.target.value }))
                 }
+                placeholder="my-episode.mp4"
               />
+            </div>
+            {mode === "project" ? (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="sceneRangeStart">Scene range start (optional)</Label>
+                  <Input
+                    id="sceneRangeStart"
+                    type="number"
+                    min={1}
+                    value={settings.sceneRangeStart ?? ""}
+                    onChange={(event) =>
+                      setSettings((current) => ({
+                        ...current,
+                        sceneRangeStart: event.target.value ? Number(event.target.value) : undefined,
+                      }))
+                    }
+                    placeholder="1"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sceneRangeEnd">Scene range end (optional)</Label>
+                  <Input
+                    id="sceneRangeEnd"
+                    type="number"
+                    min={1}
+                    value={settings.sceneRangeEnd ?? ""}
+                    onChange={(event) =>
+                      setSettings((current) => ({
+                        ...current,
+                        sceneRangeEnd: event.target.value ? Number(event.target.value) : undefined,
+                      }))
+                    }
+                    placeholder="all"
+                  />
+                </div>
+              </>
+            ) : null}
+            <div className="flex items-end space-y-2 sm:col-span-2">
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={settings.exportCaptions}
+                  onChange={(event) =>
+                    setSettings((current) => ({
+                      ...current,
+                      exportCaptions: event.target.checked,
+                    }))
+                  }
+                  className="h-4 w-4 rounded border-input"
+                />
+                Export captions (.srt)
+              </label>
             </div>
           </div>
 
@@ -763,7 +971,7 @@ export function AssemblerWorkspace() {
                 />
                 <StatCard
                   label={isVideoWorkflow ? "Media" : "Naming"}
-                  value={isVideoWorkflow ? "Veo3 clips" : validation.imageNaming}
+                  value={isVideoWorkflow ? "Video clips" : validation.imageNaming}
                   icon={FolderOpen}
                 />
               </div>
@@ -804,14 +1012,9 @@ export function AssemblerWorkspace() {
               <p className="text-sm font-medium">Validate before you render</p>
               <p className="mt-1 max-w-sm text-xs text-muted-foreground">
                 {isVideoWorkflow
-                  ? "Match SCENE_XX.mp4 clips to Snow-transcriber timestamps, then FFmpeg trims each clip and muxes your voiceover."
-                  : "Match batch images to scene timestamps, then FFmpeg trims each still and muxes your narration."}
+                  ? "Match scene clips to timeline timestamps, then FFmpeg trims each clip and muxes your voiceover."
+                  : "Match batch images to scene timestamps, apply transitions, and mux narration."}
               </p>
-              {isVideoWorkflow ? (
-                <p className="mt-3 font-mono text-[11px] text-muted-foreground">
-                  {craveProjectDir}
-                </p>
-              ) : null}
             </div>
           )}
 
@@ -825,6 +1028,11 @@ export function AssemblerWorkspace() {
                   <p className="text-xs text-muted-foreground">
                     {assembly.sceneCount} scenes · {formatDuration(assembly.totalDuration)}
                   </p>
+                  {assembly.captionsPath ? (
+                    <p className="font-mono text-xs text-muted-foreground">
+                      Captions: {assembly.captionsPath}
+                    </p>
+                  ) : null}
                 </div>
                 <Download className="ml-auto h-4 w-4 text-muted-foreground" />
               </div>

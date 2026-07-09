@@ -1,7 +1,10 @@
 export type ImageNaming = "auto" | "timestamp" | "sequential";
 export type MotionMode = "none" | "ken_burns";
 export type MediaType = "images" | "videos";
-export type SceneSource = "snow_transcriber" | "zenn_timeline" | "generic";
+export type TransitionMode = "none" | "crossfade" | "fade_black" | "wipe_left" | "slide_left";
+export type QualityPreset = "draft" | "standard" | "high";
+export type WorkflowMode = "slideshow" | "video-clips";
+export type SceneSource = "snow_transcriber" | "timeline" | "generic";
 
 export type SceneMatchSummary = {
   id: number;
@@ -32,6 +35,20 @@ export type AssemblyResult = {
   sceneCount: number;
   totalDuration: number;
   outputPath: string;
+  captionsPath?: string | null;
+};
+
+export type AssemblyPreset = {
+  id: string;
+  label: string;
+  description: string;
+  mediaType: MediaType;
+  imageNaming: ImageNaming;
+  motion: MotionMode;
+  transition: TransitionMode;
+  transitionDuration: number;
+  quality: QualityPreset;
+  fps: number;
 };
 
 export type ProjectAssemblySettings = {
@@ -47,14 +64,25 @@ export type ProjectAssemblySettings = {
   height: number;
   fps: number;
   motion: MotionMode;
+  transition: TransitionMode;
+  transitionDuration: number;
+  quality: QualityPreset;
+  exportCaptions: boolean;
+  sceneRangeStart?: number;
+  sceneRangeEnd?: number;
+  presetId?: string;
 };
 
-export type UploadAssemblySettings = {
-  imageNaming: ImageNaming;
-  width: number;
-  height: number;
-  fps: number;
-  motion: MotionMode;
+export type AssemblyJob = {
+  jobId: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  phase: string;
+  progress: number;
+  currentScene: number;
+  totalScenes: number;
+  message: string;
+  result?: AssemblyResult;
+  error?: string | null;
 };
 
 export type ByteMetric = {

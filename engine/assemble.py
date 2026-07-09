@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
+from ffmpeg_util import QualityPreset, encode_args, ensure_ffmpeg, run_command
 from images import SceneAsset
+from transitions import TransitionMode, concat_clips
 from videos import VideoAsset
 
 MotionMode = Literal["none", "ken_burns"]
+ProgressCallback = Callable[[int, int, str], None] | None
 
 
 @dataclass(frozen=True)
@@ -19,13 +21,7 @@ class AssemblyResult:
     scene_count: int
     total_duration: float
     temp_dir: Path
-
-
-def ensure_ffmpeg() -> str:
-    ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
-        raise RuntimeError("FFmpeg is not installed or not available on PATH.")
-    return ffmpeg
+    captions_path: Path | None = None
 
 
 def build_scale_filter(width: int, height: int, motion: MotionMode, duration: float, fps: int) -> str:
@@ -54,6 +50,7 @@ def image_to_clip(
     height: int,
     fps: int,
     motion: MotionMode,
+    quality: QualityPreset = "standard",
 ) -> None:
     duration = asset.scene.duration
     video_filter = build_scale_filter(width, height, motion, duration, fps)
@@ -71,6 +68,7 @@ def image_to_clip(
         video_filter,
         "-c:v",
         "libx264",
+        *encode_args(quality),
         "-pix_fmt",
         "yuv420p",
         "-r",
@@ -79,32 +77,43 @@ def image_to_clip(
         str(output_path),
     ]
 
-    _run_command(command, f"Failed to render scene {asset.scene.id:02d}")
+    run_command(command, f"Failed to render scene {asset.scene.id:02d}")
 
 
-def concat_clips(ffmpeg: str, clip_paths: list[Path], output_path: Path) -> None:
-    concat_file = output_path.with_suffix(".txt")
-    lines = [f"file '{path.as_posix()}'" for path in clip_paths]
-    concat_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+def video_to_clip(
+    ffmpeg: str,
+    asset: VideoAsset,
+    output_path: Path,
+    *,
+    width: int,
+    height: int,
+    fps: int,
+    quality: QualityPreset = "standard",
+) -> None:
+    duration = asset.scene.duration
+    video_filter = build_scale_filter(width, height, "none", duration, fps)
 
     command = [
         ffmpeg,
         "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
         "-i",
-        str(concat_file),
-        "-c",
-        "copy",
+        str(asset.video_path),
+        "-t",
+        f"{duration:.3f}",
+        "-vf",
+        video_filter,
+        "-c:v",
+        "libx264",
+        *encode_args(quality),
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        str(fps),
+        "-an",
         str(output_path),
     ]
 
-    try:
-        _run_command(command, "Failed to concatenate scene clips.")
-    finally:
-        concat_file.unlink(missing_ok=True)
+    run_command(command, f"Failed to trim scene {asset.scene.id:02d} ({asset.video_path.name})")
 
 
 def mux_audio(
@@ -134,41 +143,7 @@ def mux_audio(
         str(output_path),
     ]
 
-    _run_command(command, "Failed to mux narration audio.")
-
-
-def video_to_clip(
-    ffmpeg: str,
-    asset: VideoAsset,
-    output_path: Path,
-    *,
-    width: int,
-    height: int,
-    fps: int,
-) -> None:
-    duration = asset.scene.duration
-    video_filter = build_scale_filter(width, height, "none", duration, fps)
-
-    command = [
-        ffmpeg,
-        "-y",
-        "-i",
-        str(asset.video_path),
-        "-t",
-        f"{duration:.3f}",
-        "-vf",
-        video_filter,
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-r",
-        str(fps),
-        "-an",
-        str(output_path),
-    ]
-
-    _run_command(command, f"Failed to trim scene {asset.scene.id:02d} ({asset.video_path.name})")
+    run_command(command, "Failed to mux narration audio.")
 
 
 def assemble_video_episode(
@@ -179,6 +154,10 @@ def assemble_video_episode(
     width: int = 1920,
     height: int = 1080,
     fps: int = 30,
+    transition: TransitionMode = "none",
+    transition_duration: float = 0.4,
+    quality: QualityPreset = "standard",
+    on_progress: ProgressCallback = None,
 ) -> AssemblyResult:
     if not assets:
         raise ValueError("No matched scene videos to assemble.")
@@ -191,9 +170,13 @@ def assemble_video_episode(
 
     temp_dir = Path(tempfile.mkdtemp(prefix="snow-assembler-video-"))
     clip_paths: list[Path] = []
+    durations: list[float] = []
 
     try:
-        for asset in assets:
+        total = len(assets)
+        for index, asset in enumerate(assets, start=1):
+            if on_progress:
+                on_progress(index, total, "rendering_clips")
             clip_path = temp_dir / f"scene_{asset.scene.id:04d}.mp4"
             video_to_clip(
                 ffmpeg,
@@ -202,11 +185,27 @@ def assemble_video_episode(
                 width=width,
                 height=height,
                 fps=fps,
+                quality=quality,
             )
             clip_paths.append(clip_path)
+            durations.append(asset.scene.duration)
+
+        if on_progress:
+            on_progress(total, total, "concatenating")
 
         silent_video = temp_dir / "video_only.mp4"
-        concat_clips(ffmpeg, clip_paths, silent_video)
+        concat_clips(
+            clip_paths,
+            silent_video,
+            transition=transition,
+            transition_duration=transition_duration,
+            scene_durations=durations,
+            fps=fps,
+        )
+
+        if on_progress:
+            on_progress(total, total, "muxing_audio")
+
         mux_audio(ffmpeg, silent_video, audio_path, output_path)
 
         total_duration = round(sum(asset.scene.duration for asset in assets), 3)
@@ -230,6 +229,10 @@ def assemble_image_episode(
     height: int = 1080,
     fps: int = 30,
     motion: MotionMode = "none",
+    transition: TransitionMode = "none",
+    transition_duration: float = 0.4,
+    quality: QualityPreset = "standard",
+    on_progress: ProgressCallback = None,
 ) -> AssemblyResult:
     if not assets:
         raise ValueError("No matched scene assets to assemble.")
@@ -242,9 +245,13 @@ def assemble_image_episode(
 
     temp_dir = Path(tempfile.mkdtemp(prefix="snow-assembler-"))
     clip_paths: list[Path] = []
+    durations: list[float] = []
 
     try:
-        for asset in assets:
+        total = len(assets)
+        for index, asset in enumerate(assets, start=1):
+            if on_progress:
+                on_progress(index, total, "rendering_clips")
             clip_path = temp_dir / f"scene_{asset.scene.id:04d}.mp4"
             image_to_clip(
                 ffmpeg,
@@ -254,11 +261,27 @@ def assemble_image_episode(
                 height=height,
                 fps=fps,
                 motion=motion,
+                quality=quality,
             )
             clip_paths.append(clip_path)
+            durations.append(asset.scene.duration)
+
+        if on_progress:
+            on_progress(total, total, "concatenating")
 
         silent_video = temp_dir / "video_only.mp4"
-        concat_clips(ffmpeg, clip_paths, silent_video)
+        concat_clips(
+            clip_paths,
+            silent_video,
+            transition=transition,
+            transition_duration=transition_duration,
+            scene_durations=durations,
+            fps=fps,
+        )
+
+        if on_progress:
+            on_progress(total, total, "muxing_audio")
+
         mux_audio(ffmpeg, silent_video, audio_path, output_path)
 
         total_duration = round(sum(asset.scene.duration for asset in assets), 3)
@@ -275,15 +298,3 @@ def assemble_image_episode(
 
 def cleanup_temp_dir(temp_dir: Path) -> None:
     shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-def _run_command(command: list[str], error_prefix: str) -> None:
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        stderr = (result.stderr or result.stdout or "Unknown FFmpeg error.").strip()
-        raise RuntimeError(f"{error_prefix}: {stderr}")

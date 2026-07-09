@@ -1,150 +1,107 @@
 # Snow Assembler
 
-Local image-to-video assembler for **Zenn / SnowAgeBrain** and other batch-image YouTube workflows.
+Open-source FFmpeg assembler for **timestamp-synced video episodes** — batch stills or per-scene video clips, matched to any timeline JSON.
 
-Turn timestamped stills + Google TTS narration into a finished MP4 — no CapCut timeline editing.
-
-**MVP focus:** image episodes (Zenn) and Veo3 clip episodes (CRAVE & CONQUER). Trim `SCENE_XX.mp4` clips to Snow-transcriber timestamps, concat, mux narration.
+**Workflows:** image slideshow (still images + narration) and video clips (trim + concat + mux). Supports crossfades, Ken Burns, quality presets, async jobs with progress, and optional SRT captions.
 
 ## Quick start
 
-> **Windows note:** If the project path contains `&`, use `scripts/run-next.mjs` (already wired in `package.json`).
-
-### 1) Install frontend deps
-
 ```bash
-npm install --ignore-scripts
-node scripts/run-prisma.mjs generate
-```
-
-> Paths with `&` (e.g. `CRAVE & CONQUER`) break some npm postinstall scripts on Windows. Use `--ignore-scripts`, then run Prisma generate manually as above.
-
-### 2) Configure env
-
-```bash
+npm install --ignore-scripts   # use if your path contains special chars like &
+npm run db:generate            # only if you skipped postinstall
 cp .env.example .env
+npm run engine:up              # FFmpeg engine on :8001
+npm run dev                    # UI on :3000 (or :3001 if transcriber uses :3000)
 ```
+
+Open [http://localhost:3000/assembler](http://localhost:3000/assembler) (or `:3001`).
+
+## Environment
 
 ```env
 ASSEMBLER_ENGINE_URL=http://localhost:8001
-ZENN_DATA_DIR=C:/Users/Dimitri SnowDev/Documents/Zenn
+PROJECT_DATA_DIR=D:/Videos                    # mounted as /data/projects in Docker
+NEXT_PUBLIC_PROJECT_DATA_ROOT=D:/Videos       # UI path mapping hint
+ASSEMBLER_OUTPUT_HOST_DIR=./output            # writable fallback when project dir is read-only
 ```
 
-### 3) Start the FFmpeg engine (Docker)
+## Episode folder layout
 
-```bash
-npm run engine:up
-```
-
-### 4) Run the app
-
-```bash
-npm run dev
-```
-
-Open http://localhost:3000/assembler
-
-Or both in one command:
-
-```bash
-npm run dev:all
-```
-
-## Zenn episode folder layout
+### Image slideshow
 
 ```
-episodes/why_you_cant_stop_scrolling/
-├── why_you_cant_stop_scrolling.json   # Zenn timeline (start/end per scene)
-├── images/                            # Zapi batch exports
-│   ├── 0000_A stickman....png
-│   ├── 0002_A stickman....png
+my-episode/
+├── timeline.json          # timeline[] or scenes[] with start/end per scene
+├── images/
+│   ├── SCENE_01.png
 │   └── ...
-└── Why You Can't Stop Scrolling.m4a   # Google TTS narration
+└── narration.m4a
 ```
 
-Snow-assembler:
-
-1. Parses the Zenn `timeline` array (or Snow-transcriber `scenes` JSON)
-2. Matches images by timestamp prefix (`0000_`, `0002_`, …)
-3. Renders each still for its exact duration
-4. Concatenates clips and muxes narration → `assembled.mp4`
-
-## Docker path mapping
-
-When the engine runs in Docker, use the mounted path inside the container:
+### Video clips
 
 ```
-/data/zenn/episodes/why_you_cant_stop_scrolling
+my-episode/
+├── scenes.json            # Snow-transcriber export or custom timeline
+├── clips/                 # also: videos/, scenes/, episode/
+│   ├── SCENE_01.mp4
+│   └── ...
+└── narration.m4a
 ```
 
-The workspace UI includes a one-click switch from the Windows host path to the Docker path.
+## What the engine does
+
+1. Parses timeline JSON (`timeline[]` or Snow-transcriber `scenes[]`)
+2. Matches assets by sequential (`SCENE_01`) or timestamp prefix (`0000_`)
+3. Renders each scene clip (still → video, or trim existing clip)
+4. Concatenates with optional transitions (crossfade, fade-to-black, wipe, slide)
+5. Muxes narration audio; optionally exports `.srt` captions
+
+Docker path mapping:
+
+```
+D:/Videos/my-channel/episode-01  →  /data/projects/my-channel/episode-01
+```
+
+## Transitions & presets
+
+| Preset | Motion | Transition | Quality |
+|--------|--------|------------|---------|
+| slideshow-static | none | hard cut | standard |
+| slideshow-ken-burns | Ken Burns | crossfade | standard |
+| slideshow-cinematic | Ken Burns | fade to black | high |
+| video-clips-standard | — | hard cut | standard |
+| video-clips-smooth | — | crossfade | standard |
+| draft-preview | none | hard cut | draft (fast) |
 
 ## Scene JSON formats
 
-| Format | Source | Key fields |
-|--------|--------|------------|
-| **Zenn timeline** | `why_you_cant_stop_scrolling.json` | `timeline[].start_time`, `end_time` |
-| **Snow-transcriber** | Export from Snow-transcriber | `scenes[].start`, `end`, `duration` |
+| Source | Example file | Key fields |
+|--------|--------------|------------|
+| **Timeline** | `timeline.json` | `timeline[].start_time`, `end_time` |
+| **Snow-transcriber** | `snow-transcriber-agent.json` | `scenes[].start`, `end`, `id` |
 
-## Image naming modes
-
-| Mode | When to use |
-|------|-------------|
-| **auto** | Detects timestamp vs sequential naming |
-| **timestamp** | Zapi exports: `0000_`, `0002_` prefixes |
-| **sequential** | `SCENE_01`, `scene_1`, ordered folder |
-
-## Architecture
-
-```
-Browser → Next.js /api/assemble → Python engine :8001 → FFmpeg
-```
-
-Docker runs the Python engine only. Next.js runs locally with `npm run dev`.
-
-## Engine API
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /health` | Engine + FFmpeg status |
-| `POST /validate/project` | Check image matching for a folder |
-| `POST /assemble/images/project` | Render episode from folder paths |
-| `POST /validate/upload` | Validate uploaded JSON + images |
-| `POST /assemble/images/upload` | Render from uploaded assets |
-
-## Useful commands
+## MCP (AI agents)
 
 ```bash
-npm run engine:up      # build + start FFmpeg engine
-npm run engine:down    # stop engine
-npm run engine:logs    # tail engine logs
-npm run dev            # Next.js dev server
-npm run dev:all        # engine + Next.js together
+npm run mcp:install && npm run mcp:build
 ```
 
-## MCP server (for AI agents)
+Tools: `snow_assembler_engine_health`, `snow_assembler_validate_project`, `snow_assembler_assemble_images`
 
-Snow Assembler includes an MCP server so **Cursor, Antigravity, Claude Desktop, Grok**, and other MCP clients can validate and assemble episodes programmatically.
-
-```bash
-npm run mcp:install
-npm run mcp:build
-```
-
-**Tools:** `snow_assembler_engine_health`, `snow_assembler_validate_project`, `snow_assembler_assemble_images`
-
-**In-app guide:** open [/mcp](http://localhost:3000/mcp) for copy-paste configs per client (Grok, Antigravity, VS Code, Cursor, Claude).
-
-See [mcp-server/MCP_SETUP.md](mcp-server/MCP_SETUP.md) for the full markdown reference.
-
-## System metrics
-
-The assembler UI shows live **CPU, RAM, and disk** usage from the FFmpeg engine (polls every ~2.5s). During renders, higher CPU usually means FFmpeg is encoding at full speed — useful for understanding render time vs hardware.
+See [mcp-server/MCP_SETUP.md](mcp-server/MCP_SETUP.md).
 
 ## Roadmap
 
-- [x] Image assembly MVP (Zenn)
-- [x] MCP server for agents
-- [x] Video clip trimming (CRAVE & CONQUER / Veo3)
-- [ ] Music bed + ducking templates
-- [ ] n8n workflow hooks
+- [x] Image assembly with transitions
+- [x] Video clip trimming with transitions
+- [x] Async jobs + progress polling
+- [x] Quality presets (draft / standard / high)
+- [x] SRT caption export
+- [x] Scene range (partial renders)
+- [ ] Upload-mode job polling
+- [ ] Preset import/export
+
+## License
+
+MIT — clone it, fork it, use it for any channel.

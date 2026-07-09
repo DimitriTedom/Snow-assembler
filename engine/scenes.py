@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 
-SceneSource = Literal["snow_transcriber", "zenn_timeline", "generic"]
+SceneSource = Literal["snow_transcriber", "timeline", "generic"]
 
 
 @dataclass(frozen=True)
@@ -54,7 +54,7 @@ def load_scenes_json(path: Path) -> tuple[list[AssemblerScene], SceneSource, dic
 
 def detect_scene_source(payload: dict[str, Any]) -> SceneSource:
     if isinstance(payload.get("timeline"), list):
-        return "zenn_timeline"
+        return "timeline"
     if isinstance(payload.get("scenes"), list):
         return "snow_transcriber"
     if isinstance(payload.get("agentJson"), dict) and isinstance(payload["agentJson"].get("scenes"), list):
@@ -65,8 +65,8 @@ def detect_scene_source(payload: dict[str, Any]) -> SceneSource:
 def normalize_scenes_payload(payload: dict[str, Any]) -> list[AssemblerScene]:
     source = detect_scene_source(payload)
 
-    if source == "zenn_timeline":
-        return _from_zenn_timeline(payload["timeline"])
+    if source == "timeline":
+        return _from_timeline(payload["timeline"])
     if source == "snow_transcriber":
         scenes = payload.get("scenes")
         if not isinstance(scenes, list):
@@ -74,11 +74,11 @@ def normalize_scenes_payload(payload: dict[str, Any]) -> list[AssemblerScene]:
         return _from_snow_transcriber(scenes)
 
     raise ValueError(
-        "Unsupported scenes JSON. Expected Snow-transcriber export or Zenn timeline format."
+        "Unsupported scenes JSON. Expected Snow-transcriber export or timeline format."
     )
 
 
-def _from_zenn_timeline(timeline: list[dict[str, Any]]) -> list[AssemblerScene]:
+def _from_timeline(timeline: list[dict[str, Any]]) -> list[AssemblerScene]:
     scenes: list[AssemblerScene] = []
 
     for index, entry in enumerate(timeline, start=1):

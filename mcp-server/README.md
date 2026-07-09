@@ -1,68 +1,41 @@
 # Snow Assembler MCP Server
 
-MCP server so **Cursor, Antigravity, Claude Desktop, Grok**, and any MCP-compatible agent can validate and assemble Zenn image episodes.
+MCP server so **Cursor, Antigravity, Claude Desktop, Grok**, and any MCP-compatible agent can validate and assemble timestamp-synced episodes.
 
-Uses **stdio** transport → talks to the FFmpeg engine at `http://localhost:8001`.
+## Setup
 
-## Prerequisites
+```bash
+npm run mcp:install
+npm run mcp:build
+npm run engine:up
+```
 
-1. **Assembler engine running:**
-   ```bash
-   npm run engine:up
-   ```
-2. **Build the MCP server:**
-   ```bash
-   npm run mcp:install
-   npm run mcp:build
-   ```
+Configure your MCP client to run `mcp-server/dist/index.js` with `ASSEMBLER_ENGINE_URL=http://localhost:8001`.
+
+See [MCP_SETUP.md](./MCP_SETUP.md) for per-client config blocks.
 
 ## Tools
 
-| Tool | Description |
-|------|-------------|
-| `snow_assembler_engine_health` | Check if FFmpeg engine is online |
-| `snow_assembler_validate_project` | Match images to scene timestamps |
-| `snow_assembler_assemble_images` | Render `assembled.mp4` from episode folder |
+| Tool | Purpose |
+|------|---------|
+| `snow_assembler_engine_health` | Check FFmpeg engine is online |
+| `snow_assembler_validate_project` | Match images/clips to timeline JSON |
+| `snow_assembler_assemble_images` | Render MP4 with transitions |
 
 ## Resource
 
-- `snow://assembler/workflow/guide` — Agent workflow for Zenn pipelines
+- `snow://assembler/workflow/guide` — Agent workflow for episode assembly
 
-## Configure your agent
-
-**UI guide:** run the app and open `/mcp` for interactive setup with copy-paste configs.
-
-See **[MCP_SETUP.md](./MCP_SETUP.md)** for full setup across:
-
-- **Grok** (`~/.grok/config.toml`)
-- **Antigravity IDE / Gemini CLI** (`~/.gemini/config/mcp_config.json`)
-- **VS Code** (`.vscode/mcp.json`)
-- **Cursor** (`.cursor/mcp.json`)
-- **Claude Desktop** (`config/claude-desktop.mcp.json`)
-
-Template configs live in `mcp-server/config/`.
-
-## Example agent flow
+## Example
 
 ```
-1. snow_assembler_engine_health()
-
-2. snow_assembler_validate_project({
-     project_dir: "C:/Users/Dimitri SnowDev/Documents/Zenn/episodes/why_you_cant_stop_scrolling",
-     use_docker_paths: true
-   })
-   → matchedCount: 229 / sceneCount: 229
-
-3. snow_assembler_assemble_images({
-     project_dir: "C:/Users/Dimitri SnowDev/Documents/Zenn/episodes/why_you_cant_stop_scrolling",
-     use_docker_paths: true
-   })
-   → outputPath: /data/zenn/episodes/why_you_cant_stop_scrolling/assembled.mp4
+Validate my episode at D:/Videos/my-episode with snow_assembler_validate_project
+(use_docker_paths: true, image_naming: sequential, transition: crossfade),
+then assemble if all scenes match.
 ```
 
-## Environment
+Docker path when `PROJECT_DATA_DIR=D:/Videos`:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SNOW_ASSEMBLER_ENGINE_URL` | `http://localhost:8001` | FFmpeg engine base URL |
-| `ASSEMBLER_ENGINE_URL` | (fallback) | Same as above |
+```
+D:/Videos/my-episode  →  /data/projects/my-episode
+```

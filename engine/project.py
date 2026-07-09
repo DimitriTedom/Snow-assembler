@@ -70,7 +70,7 @@ def resolve_project_paths(
         media_path = resolved_videos or discover_videos_dir(project_dir)
         if media_path is None:
             raise FileNotFoundError(
-                f"No Veo3 clips folder found in {project_dir}. "
+                f"No video clips folder found in {project_dir}. "
                 f"Add a subfolder with SCENE_XX.mp4 files or set videos_dir."
             )
     else:
@@ -106,7 +106,7 @@ def discover_scenes_json(project_dir: Path) -> Path:
 
     raise FileNotFoundError(
         f"No scenes JSON found in {project_dir}. "
-        "Expected Snow-transcriber export or Zenn episode JSON."
+        "Expected Snow-transcriber export or timeline JSON."
     )
 
 
@@ -179,7 +179,7 @@ def discover_videos_dir(project_dir: Path, *, required: bool = True) -> Path | N
 
     if required:
         raise FileNotFoundError(
-            f"No Veo3 clips folder found in {project_dir}. "
+            f"No video clips folder found in {project_dir}. "
             "Expected a subfolder with SCENE_XX.mp4 files."
         )
     return None

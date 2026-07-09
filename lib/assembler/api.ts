@@ -1,6 +1,7 @@
+import { normalizeOutputFilename } from "@/lib/assembler/filename";
 import type { ProjectAssemblySettings } from "@/lib/assembler/types";
 
-type EngineProjectBody = {
+type EngineProjectBody = Partial<ProjectAssemblySettings> & {
   project_dir?: string;
   projectDir?: string;
   scenes_json_path?: string;
@@ -17,21 +18,34 @@ type EngineProjectBody = {
   outputFilename?: string;
   image_naming?: ProjectAssemblySettings["imageNaming"];
   imageNaming?: ProjectAssemblySettings["imageNaming"];
-  width?: number;
-  height?: number;
-  fps?: number;
-  motion?: ProjectAssemblySettings["motion"];
+  transition_duration?: number;
+  transitionDuration?: number;
+  export_captions?: boolean;
+  exportCaptions?: boolean;
+  scene_range_start?: number;
+  sceneRangeStart?: number;
+  scene_range_end?: number;
+  sceneRangeEnd?: number;
+  preset_id?: string;
+  presetId?: string;
 };
 
-const ZENN_MARKERS = ["/Documents/Zenn/", "/documents/zenn/"] as const;
-const CRAVE_VIDEO_MARKERS = ["/CRAVE & CONQUER/Videos/", "/crave & conquer/videos/"] as const;
-const CRAVE_ROOT_MARKERS = ["/CRAVE & CONQUER/", "/crave & conquer/"] as const;
+const PROJECT_ROOT = (
+  process.env.NEXT_PUBLIC_PROJECT_DATA_ROOT ?? process.env.PROJECT_DATA_ROOT ?? ""
+).replace(/\\/g, "/");
 
-/** Convert a Windows project path to the matching Docker volume mount. */
-export function toDockerZennPath(hostPath: string): string {
+const LEGACY_MARKERS = [
+  { marker: "/documents/zenn/", mount: "/data/zenn/" },
+  { marker: "/crave & conquer/videos/", mount: "/data/crave-videos/" },
+  { marker: "/crave & conquer/", mount: "/data/crave-root/" },
+] as const;
+
+/** Convert a host project path to the matching Docker volume mount. */
+export function toDockerProjectPath(hostPath: string): string {
   const normalized = hostPath.replace(/\\/g, "/");
 
   if (
+    normalized.startsWith("/data/projects/") ||
     normalized.startsWith("/data/zenn/") ||
     normalized.startsWith("/data/crave-videos/") ||
     normalized.startsWith("/data/crave-root/")
@@ -40,38 +54,34 @@ export function toDockerZennPath(hostPath: string): string {
   }
 
   const lower = normalized.toLowerCase();
-  for (const marker of ZENN_MARKERS) {
-    const index = lower.indexOf(marker);
-    if (index !== -1) {
-      const suffix = normalized.slice(index + marker.length);
-      return `/data/zenn/${suffix}`;
+
+  if (PROJECT_ROOT) {
+    const rootLower = PROJECT_ROOT.toLowerCase().replace(/\/$/, "");
+    if (lower.startsWith(rootLower)) {
+      const suffix = normalized.slice(PROJECT_ROOT.replace(/\/$/, "").length).replace(/^\//, "");
+      return `/data/projects/${suffix}`;
     }
   }
 
-  for (const marker of CRAVE_VIDEO_MARKERS) {
-    const index = lower.indexOf(marker.toLowerCase());
+  for (const entry of LEGACY_MARKERS) {
+    const index = lower.indexOf(entry.marker);
     if (index !== -1) {
-      const suffix = normalized.slice(index + marker.length);
-      return `/data/crave-videos/${suffix}`;
-    }
-  }
-
-  for (const marker of CRAVE_ROOT_MARKERS) {
-    const index = lower.indexOf(marker.toLowerCase());
-    if (index !== -1) {
-      const suffix = normalized.slice(index + marker.length);
-      return `/data/crave-root/${suffix}`;
+      const suffix = normalized.slice(index + entry.marker.length);
+      return `${entry.mount}${suffix}`;
     }
   }
 
   return normalized;
 }
 
+/** @deprecated Use toDockerProjectPath */
+export const toDockerZennPath = toDockerProjectPath;
+
 function resolveEnginePath(raw: string | undefined): string | undefined {
   if (!raw?.trim()) {
     return undefined;
   }
-  return toDockerZennPath(raw.trim());
+  return toDockerProjectPath(raw.trim());
 }
 
 /** Map frontend camelCase settings to Python engine snake_case body. */
@@ -79,17 +89,26 @@ export function toEngineProjectPayload(settings: EngineProjectBody) {
   const projectDir = settings.project_dir ?? settings.projectDir ?? "";
 
   return {
-    project_dir: toDockerZennPath(projectDir),
+    project_dir: toDockerProjectPath(projectDir),
     scenes_json_path: resolveEnginePath(settings.scenes_json_path ?? settings.scenesJsonPath),
     images_dir: resolveEnginePath(settings.images_dir ?? settings.imagesDir),
     videos_dir: resolveEnginePath(settings.videos_dir ?? settings.videosDir),
     media_type: settings.media_type ?? settings.mediaType ?? "images",
     audio_path: resolveEnginePath(settings.audio_path ?? settings.audioPath),
-    output_filename: settings.output_filename ?? settings.outputFilename ?? "assembled.mp4",
+    output_filename: normalizeOutputFilename(
+      settings.output_filename ?? settings.outputFilename,
+    ),
     image_naming: settings.image_naming ?? settings.imageNaming ?? "sequential",
     width: settings.width ?? 1920,
     height: settings.height ?? 1080,
     fps: settings.fps ?? 30,
     motion: settings.motion ?? "none",
+    transition: settings.transition ?? "none",
+    transition_duration: settings.transition_duration ?? settings.transitionDuration ?? 0.4,
+    quality: settings.quality ?? "standard",
+    export_captions: settings.export_captions ?? settings.exportCaptions ?? false,
+    scene_range_start: settings.scene_range_start ?? settings.sceneRangeStart ?? null,
+    scene_range_end: settings.scene_range_end ?? settings.sceneRangeEnd ?? null,
+    preset_id: settings.preset_id ?? settings.presetId ?? null,
   };
 }

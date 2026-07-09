@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { toEngineProjectPayload } from "@/lib/assembler/api";
+import { normalizeOutputFilename } from "@/lib/assembler/filename";
 import { formatEngineFetchError, isAbortError } from "@/lib/assembler/engine-errors";
 import { fetchEngine } from "@/lib/assembler/engine-fetch";
 
@@ -51,6 +52,15 @@ export async function POST(request: Request) {
       engineForm.append("height", String(incoming.get("height") ?? "1080"));
       engineForm.append("fps", String(incoming.get("fps") ?? "30"));
       engineForm.append("motion", String(incoming.get("motion") ?? "none"));
+      engineForm.append("transition", String(incoming.get("transition") ?? "none"));
+      engineForm.append(
+        "transition_duration",
+        String(incoming.get("transition_duration") ?? "0.4"),
+      );
+      engineForm.append("quality", String(incoming.get("quality") ?? "standard"));
+      engineForm.append("export_captions", String(incoming.get("export_captions") ?? "false"));
+      const outputFilename = normalizeOutputFilename(String(incoming.get("output_filename") ?? "assembled.mp4"));
+      engineForm.append("output_filename", outputFilename);
 
       for (const [, value] of incoming.entries()) {
         if (value instanceof File && value !== scenesJson && value !== narration) {
@@ -74,13 +84,16 @@ export async function POST(request: Request) {
       const buffer = await response.arrayBuffer();
       const sceneCount = response.headers.get("X-Snow-Scene-Count") ?? "0";
       const totalDuration = response.headers.get("X-Snow-Total-Duration") ?? "0";
+      const resolvedFilename =
+        response.headers.get("X-Snow-Output-Filename") ?? outputFilename;
 
       return new NextResponse(buffer, {
         status: 200,
         headers: {
           "Content-Type": "video/mp4",
-          "Content-Disposition": 'attachment; filename="assembled.mp4"',
+          "Content-Disposition": `attachment; filename="${resolvedFilename}"`,
           "X-Snow-Scene-Count": sceneCount,
+          "X-Snow-Output-Filename": resolvedFilename,
           "X-Snow-Total-Duration": totalDuration,
         },
       });

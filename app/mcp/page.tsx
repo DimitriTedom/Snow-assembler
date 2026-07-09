@@ -33,7 +33,7 @@ export default function McpSetupPage() {
         </h1>
         <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
           Step-by-step configs for each client. Paste your repo path, copy the generated block, and
-          your agent can validate and assemble Zenn episodes without touching the web UI.
+          your agent can validate and assemble episodes without touching the web UI.
         </p>
       </div>
 

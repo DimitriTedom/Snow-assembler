@@ -33,12 +33,15 @@ export const ASSEMBLER_MCP_SETUP: McpSetupConfig = {
   enginePort: 8001,
   engineEnvVar: "ASSEMBLER_ENGINE_URL",
   engineUrl: "http://localhost:8001",
-  defaultRepoPath: "D:/SnowDev/Videos/Youtube/CRAVE & CONQUER/Snow-assembler",
+  defaultRepoPath: "path/to/Snow-assembler",
   docsUrl: "https://github.com/DimitriTedom/Snow-assembler/blob/main/mcp-server/MCP_SETUP.md",
   tools: [
     { name: "snow_assembler_engine_health", description: "Check if the FFmpeg engine is online" },
     { name: "snow_assembler_validate_project", description: "Match batch images to scene timestamps" },
-    { name: "snow_assembler_assemble_images", description: "Render assembled.mp4 from an episode folder" },
+    {
+      name: "snow_assembler_assemble_images",
+      description: "Render assembled.mp4 with transitions from an episode folder",
+    },
   ],
   clients: [
     {
@@ -88,7 +91,7 @@ export const ASSEMBLER_MCP_SETUP: McpSetupConfig = {
         "Start the engine: npm run engine:up",
         "Enable MCP in Cursor settings (project uses .cursor/mcp.json)",
         "Restart Cursor if tools do not appear",
-        "Ask the agent to validate or assemble your Zenn episode",
+        "Ask the agent to validate or assemble your episode folder",
       ],
     },
     {
@@ -106,11 +109,11 @@ export const ASSEMBLER_MCP_SETUP: McpSetupConfig = {
     },
   ],
   examplePrompt:
-    'Validate my episode at C:/Users/Dimitri SnowDev/Documents/Zenn/episodes/why_you_cant_stop_scrolling with snow_assembler_validate_project (use_docker_paths: true, image_naming: sequential), then assemble if all scenes match.',
+    'Validate my episode at D:/Videos/my-episode with snow_assembler_validate_project (use_docker_paths: true, image_naming: sequential, transition: crossfade), then assemble if all scenes match.',
   troubleshoot: [
     { problem: "Tools not listed", fix: "Run npm run mcp:build and confirm mcp-server/dist/index.js exists" },
     { problem: "Engine offline", fix: "npm run engine:up then open http://localhost:8001/health" },
-    { problem: "Path not found in Docker", fix: "Use use_docker_paths: true and keep episodes under Documents/Zenn" },
+    { problem: "Path not found in Docker", fix: "Set PROJECT_DATA_DIR in .env and use use_docker_paths: true" },
     { problem: "Windows & in folder path", fix: "MCP uses node directly — OK. Use forward slashes in configs" },
   ],
 };

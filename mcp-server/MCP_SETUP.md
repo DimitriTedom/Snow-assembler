@@ -1,172 +1,83 @@
-# Snow Assembler MCP Setup
+# Snow Assembler — MCP Setup
 
-Connect **Grok, Antigravity, VS Code, Cursor, Claude Desktop, Gemini CLI**, and any stdio MCP client to Snow Assembler.
+Connect any MCP-compatible AI client to validate and assemble episodes locally.
 
 ## Prerequisites
 
-1. **FFmpeg engine running** (port `8001`):
+1. Clone Snow Assembler and install dependencies
+2. `npm run engine:up` — FFmpeg engine on port **8001**
+3. `npm run mcp:install && npm run mcp:build`
 
-   ```bash
-   cd Snow-assembler
-   npm run engine:up
-   ```
+Set `PROJECT_DATA_DIR` in `.env` to the parent folder of your episode directories (mounted as `/data/projects` in Docker).
 
-2. **MCP server built**:
+## Repo path
 
-   ```bash
-   npm run mcp:install
-   npm run mcp:build
-   ```
+Use your actual clone path, e.g.:
 
-3. Replace `ABSOLUTE_PATH_TO_REPO` in the templates below with your install path, e.g.:
+```
+D:/Projects/Snow-assembler
+```
 
-   ```
-   D:/SnowDev/Videos/Youtube/CRAVE & CONQUER/Snow-assembler
-   ```
-
-   Use forward slashes on Windows — paths with `&` break npm `.bin` shims; the MCP server uses `node` directly and is unaffected.
-
-## Tools exposed
+## Tools
 
 | Tool | Description |
 |------|-------------|
-| `snow_assembler_engine_health` | Check FFmpeg engine status |
-| `snow_assembler_validate_project` | Match images to scene timestamps |
-| `snow_assembler_assemble_images` | Render `assembled.mp4` from episode folder |
+| `snow_assembler_engine_health` | Engine + FFmpeg status |
+| `snow_assembler_validate_project` | Scene ↔ asset matching |
+| `snow_assembler_assemble_images` | Render MP4 (transitions, quality, captions) |
 
-**Resource:** `snow://assembler/workflow/guide` — agent workflow for Zenn pipelines.
+**Resource:** `snow://assembler/workflow/guide` — agent workflow reference.
 
----
+## Grok (`~/.grok/config.toml`)
 
-## Grok
-
-**Config file:** `~/.grok/config.toml` (user) or `.grok/config.toml` (project)
-
-Copy the snippet from `config/grok-config.toml`, or run:
-
-```bash
-grok mcp add snow-assembler -e ASSEMBLER_ENGINE_URL=http://localhost:8001 -- node ABSOLUTE_PATH_TO_REPO/mcp-server/dist/index.js
+```toml
+[mcp_servers.snow-assembler]
+command = "node"
+args = ["D:/Projects/Snow-assembler/mcp-server/dist/index.js"]
+env = { ASSEMBLER_ENGINE_URL = "http://localhost:8001", PROJECT_DATA_ROOT = "D:/Videos" }
+enabled = true
 ```
 
-Verify:
+Verify: `grok mcp doctor snow-assembler`
 
-```bash
-grok mcp list
-grok mcp doctor snow-assembler
-```
-
----
-
-## Antigravity IDE & Gemini CLI
-
-Antigravity shares MCP config across IDE and CLI via:
-
-```
-~/.gemini/config/mcp_config.json
-```
-
-Merge the entry from `config/antigravity.mcp.json`:
+## Cursor / Claude Desktop (`.cursor/mcp.json`)
 
 ```json
 {
   "mcpServers": {
     "snow-assembler": {
       "command": "node",
-      "args": ["D:/SnowDev/Videos/Youtube/CRAVE & CONQUER/Snow-assembler/mcp-server/dist/index.js"],
+      "args": ["D:/Projects/Snow-assembler/mcp-server/dist/index.js"],
       "env": {
-        "ASSEMBLER_ENGINE_URL": "http://localhost:8001"
+        "ASSEMBLER_ENGINE_URL": "http://localhost:8001",
+        "PROJECT_DATA_ROOT": "D:/Videos"
       }
     }
   }
 }
 ```
 
-Restart Antigravity IDE or Antigravity CLI after editing. Ask the agent: *"What MCP servers do we have?"* to confirm.
+## Antigravity (`~/.gemini/config/mcp_config.json`)
 
-**Project-scoped:** some Antigravity versions also read workspace `.gemini/config/mcp_config.json` — copy the same `mcpServers` block there if you want per-repo config.
-
----
+Merge the same `mcpServers` block as Cursor.
 
 ## VS Code
 
-**Workspace config:** `.vscode/mcp.json` is preconfigured in this repo (uses `${workspaceFolder}`).
+This repo includes `.vscode/mcp.json` — open the folder in VS Code and enable the server when prompted.
 
-**User config:** run **MCP: Open User Configuration** and paste from `config/vscode.mcp.json`.
-
-```json
-{
-  "servers": {
-    "snow-assembler": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["D:/SnowDev/Videos/Youtube/CRAVE & CONQUER/Snow-assembler/mcp-server/dist/index.js"],
-      "env": {
-        "ASSEMBLER_ENGINE_URL": "http://localhost:8001"
-      }
-    }
-  }
-}
-```
-
-Trust and start the server when prompted. Use **MCP: List Servers** → **Show Output** if tools do not appear.
-
----
-
-## Cursor
-
-**Project config:** `.cursor/mcp.json` is preconfigured (relative path to `mcp-server/dist/index.js`).
-
-Enable MCP in Cursor settings. Ensure `npm run engine:up` is running.
-
----
-
-## Claude Desktop
-
-Merge into `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
-
-See `config/claude-desktop.mcp.json`.
-
-Restart Claude Desktop after saving.
-
----
-
-## Environment variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SNOW_ASSEMBLER_ENGINE_URL` | `http://localhost:8001` | FFmpeg engine base URL |
-| `ASSEMBLER_ENGINE_URL` | (fallback) | Same as above |
-
----
-
-## Example agent flow
+## Example agent prompt
 
 ```
-1. snow_assembler_engine_health()
-
-2. snow_assembler_validate_project({
-     project_dir: "C:/Users/Dimitri SnowDev/Documents/Zenn/episodes/why_you_cant_stop_scrolling",
-     use_docker_paths: true,
-     image_naming: "sequential"
-   })
-
-3. snow_assembler_assemble_images({
-     project_dir: "C:/Users/Dimitri SnowDev/Documents/Zenn/episodes/why_you_cant_stop_scrolling",
-     use_docker_paths: true,
-     image_naming: "sequential"
-   })
+Validate my episode at D:/Videos/my-episode with snow_assembler_validate_project
+(use_docker_paths: true, image_naming: sequential, transition: crossfade),
+then assemble with preset_id slideshow-ken-burns if all scenes match.
 ```
-
-`use_docker_paths: true` converts Windows `Documents/Zenn/...` paths to Docker mount `/data/zenn/...` automatically.
-
----
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---------|-----|
-| Tools not listed | Run `npm run mcp:build`; confirm `mcp-server/dist/index.js` exists |
-| Engine offline | `npm run engine:up` then `curl http://localhost:8001/health` |
-| Path not found in Docker | Use `use_docker_paths: true` and keep episodes under `Documents/Zenn` |
-| Windows `&` in path breaks npm scripts | MCP uses `node` directly — OK. For Next.js use `node scripts/run-next.mjs` |
-| VS Code server won't start | Check MCP output log; verify `node` is on PATH |
+| Tools not listed | `npm run mcp:build` — confirm `mcp-server/dist/index.js` exists |
+| Engine offline | `npm run engine:up` then open http://localhost:8001/health |
+| Path not found in Docker | Set `PROJECT_DATA_DIR` in `.env` and use `use_docker_paths: true` |
+| Windows `&` in path | Use forward slashes in MCP config; engine handles the rest |

@@ -18,12 +18,17 @@ from assemble import (
     assemble_image_episode,
     assemble_video_episode,
     cleanup_temp_dir,
-    ensure_ffmpeg,
 )
+from captions import write_srt
+from ffmpeg_util import QualityPreset, ensure_ffmpeg
 from images import ImageNaming, match_scenes_to_images
+from jobs import create_job, get_job, launch_job, request_cancel
+from presets import get_preset, list_presets
 from project import discover_images_dir, discover_scenes_json, resolve_project_paths
 from scenes import SceneSource, load_scenes_json, normalize_scenes_payload
 from system import get_system_stats
+from filename import sanitize_output_filename
+from transitions import TransitionMode
 from videos import match_scenes_to_videos
 
 MediaType = Literal["images", "videos"]
@@ -84,6 +89,13 @@ class ProjectAssemblyRequest(BaseModel):
     height: int = Field(default=1080, ge=360, le=2160)
     fps: int = Field(default=30, ge=24, le=60)
     motion: Literal["none", "ken_burns"] = "none"
+    transition: TransitionMode = "none"
+    transition_duration: float = Field(default=0.4, ge=0.1, le=2.0)
+    quality: QualityPreset = "standard"
+    export_captions: bool = False
+    scene_range_start: int | None = Field(default=None, ge=1)
+    scene_range_end: int | None = Field(default=None, ge=1)
+    preset_id: str | None = None
 
 
 class SceneMatchSummary(BaseModel):
@@ -115,7 +127,44 @@ class AssemblyResponse(BaseModel):
     sceneCount: int
     totalDuration: float
     outputPath: str
+    captionsPath: str | None = None
     downloadUrl: str | None = None
+
+
+def apply_preset(request: ProjectAssemblyRequest) -> ProjectAssemblyRequest:
+    if not request.preset_id:
+        return request
+
+    preset = get_preset(request.preset_id)
+    return request.model_copy(
+        update={
+            "media_type": preset.get("mediaType", request.media_type),
+            "image_naming": preset.get("imageNaming", request.image_naming),
+            "motion": preset.get("motion", request.motion),
+            "transition": preset.get("transition", request.transition),
+            "transition_duration": preset.get("transitionDuration", request.transition_duration),
+            "quality": preset.get("quality", request.quality),
+            "fps": preset.get("fps", request.fps),
+        }
+    )
+
+
+def filter_assets_by_range(assets, scene_range_start: int | None, scene_range_end: int | None):
+    if scene_range_start is None and scene_range_end is None:
+        return assets
+
+    filtered = []
+    for asset in assets:
+        scene_id = asset.scene.id
+        if scene_range_start is not None and scene_id < scene_range_start:
+            continue
+        if scene_range_end is not None and scene_id > scene_range_end:
+            continue
+        filtered.append(asset)
+
+    if not filtered:
+        raise ValueError("No scenes matched the requested scene range.")
+    return filtered
 
 
 def build_validation(
@@ -298,7 +347,11 @@ def validate_project(request: ProjectAssemblyRequest) -> ValidationResponse:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
-def _assemble_images_project(request: ProjectAssemblyRequest) -> AssemblyResponse:
+def _assemble_images_project(
+    request: ProjectAssemblyRequest,
+    on_progress=None,
+) -> AssemblyResponse:
+    request = apply_preset(request)
     project_dir = Path(request.project_dir)
     scenes_path, images_path, audio_path, _ = resolve_project_paths(
         project_dir,
@@ -307,7 +360,8 @@ def _assemble_images_project(request: ProjectAssemblyRequest) -> AssemblyRespons
         audio_path=request.audio_path,
         output_filename=request.output_filename,
     )
-    output_path = resolve_writable_output_path(project_dir, request.output_filename)
+    output_filename = sanitize_output_filename(request.output_filename)
+    output_path = resolve_writable_output_path(project_dir, output_filename)
 
     scenes, source, _ = load_scenes_json(scenes_path)
     validation = match_scenes_to_images(scenes, images_path, naming=request.image_naming)
@@ -320,22 +374,39 @@ def _assemble_images_project(request: ProjectAssemblyRequest) -> AssemblyRespons
             f"(timestamp keys: {missing_keys}{suffix})."
         )
 
-    result = assemble_image_episode(
+    matched = filter_assets_by_range(
         validation.matched,
+        request.scene_range_start,
+        request.scene_range_end,
+    )
+
+    result = assemble_image_episode(
+        matched,
         audio_path,
         output_path,
         width=request.width,
         height=request.height,
         fps=request.fps,
         motion=request.motion,
+        transition=request.transition,
+        transition_duration=request.transition_duration,
+        quality=request.quality,
+        on_progress=on_progress,
     )
     cleanup_temp_dir(result.temp_dir)
+
+    captions_path = None
+    if request.export_captions:
+        captions_file = output_path.with_suffix(".srt")
+        write_srt([asset.scene for asset in matched], captions_file)
+        captions_path = str(captions_file)
 
     return AssemblyResponse(
         sceneSource=source,
         sceneCount=result.scene_count,
         totalDuration=result.total_duration,
         outputPath=str(result.output_path),
+        captionsPath=captions_path,
     )
 
 
@@ -351,7 +422,11 @@ async def assemble_images_project(request: ProjectAssemblyRequest) -> AssemblyRe
         raise HTTPException(status_code=500, detail=str(error)) from error
 
 
-def _assemble_videos_project(request: ProjectAssemblyRequest) -> AssemblyResponse:
+def _assemble_videos_project(
+    request: ProjectAssemblyRequest,
+    on_progress=None,
+) -> AssemblyResponse:
+    request = apply_preset(request)
     project_dir = Path(request.project_dir)
     scenes_path, videos_path, audio_path, _ = resolve_project_paths(
         project_dir,
@@ -361,7 +436,8 @@ def _assemble_videos_project(request: ProjectAssemblyRequest) -> AssemblyRespons
         output_filename=request.output_filename,
         media_type="videos",
     )
-    output_path = resolve_writable_output_path(project_dir, request.output_filename)
+    output_filename = sanitize_output_filename(request.output_filename)
+    output_path = resolve_writable_output_path(project_dir, output_filename)
 
     scenes, source, _ = load_scenes_json(scenes_path)
     validation = match_scenes_to_videos(scenes, videos_path)
@@ -374,21 +450,38 @@ def _assemble_videos_project(request: ProjectAssemblyRequest) -> AssemblyRespons
             f"({missing_ids}{suffix})."
         )
 
-    result = assemble_video_episode(
+    matched = filter_assets_by_range(
         validation.matched,
+        request.scene_range_start,
+        request.scene_range_end,
+    )
+
+    result = assemble_video_episode(
+        matched,
         audio_path,
         output_path,
         width=request.width,
         height=request.height,
         fps=request.fps,
+        transition=request.transition,
+        transition_duration=request.transition_duration,
+        quality=request.quality,
+        on_progress=on_progress,
     )
     cleanup_temp_dir(result.temp_dir)
+
+    captions_path = None
+    if request.export_captions:
+        captions_file = output_path.with_suffix(".srt")
+        write_srt([asset.scene for asset in matched], captions_file)
+        captions_path = str(captions_file)
 
     return AssemblyResponse(
         sceneSource=source,
         sceneCount=result.scene_count,
         totalDuration=result.total_duration,
         outputPath=str(result.output_path),
+        captionsPath=captions_path,
     )
 
 
@@ -442,10 +535,16 @@ async def assemble_images_upload(
     height: int = Form(1080),
     fps: int = Form(30),
     motion: Literal["none", "ken_burns"] = Form("none"),
+    transition: TransitionMode = Form("none"),
+    transition_duration: float = Form(0.4),
+    quality: QualityPreset = Form("standard"),
+    export_captions: bool = Form(False),
+    output_filename: str = Form("assembled.mp4"),
 ) -> FileResponse:
     temp_dir = Path(tempfile.mkdtemp(prefix="snow-assembler-upload-"))
     job_id = temp_dir.name.split("-")[-1]
-    output_path = OUTPUT_ROOT / f"assembled_{job_id}.mp4"
+    safe_filename = sanitize_output_filename(output_filename)
+    output_path = OUTPUT_ROOT / f"{Path(safe_filename).stem}_{job_id}.mp4"
 
     try:
         scenes_path = temp_dir / "scenes.json"
@@ -479,15 +578,23 @@ async def assemble_images_upload(
             height=height,
             fps=fps,
             motion=motion,
+            transition=transition,
+            transition_duration=transition_duration,
+            quality=quality,
         )
         cleanup_temp_dir(result.temp_dir)
+
+        if export_captions:
+            captions_file = output_path.with_suffix(".srt")
+            write_srt([asset.scene for asset in validation.matched], captions_file)
 
         return FileResponse(
             path=result.output_path,
             media_type="video/mp4",
-            filename="assembled.mp4",
+            filename=safe_filename,
             headers={
                 "X-Snow-Scene-Count": str(result.scene_count),
+                "X-Snow-Output-Filename": safe_filename,
                 "X-Snow-Scene-Source": source,
                 "X-Snow-Total-Duration": str(result.total_duration),
             },
@@ -498,6 +605,43 @@ async def assemble_images_upload(
     except (ValueError, RuntimeError) as error:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@app.get("/presets")
+def presets() -> dict:
+    return {"presets": list_presets()}
+
+
+def _run_project_assembly_job(request: ProjectAssemblyRequest, on_progress):
+    request = apply_preset(request)
+    if request.media_type == "videos":
+        response = _assemble_videos_project(request, on_progress=on_progress)
+    else:
+        response = _assemble_images_project(request, on_progress=on_progress)
+    return response.model_dump()
+
+
+@app.post("/assemble/jobs")
+async def start_assembly_job(request: ProjectAssemblyRequest) -> dict:
+    job = create_job()
+    launch_job(job, lambda progress: _run_project_assembly_job(request, progress))
+    return job.to_dict()
+
+
+@app.get("/assemble/jobs/{job_id}")
+def assembly_job_status(job_id: str) -> dict:
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return job.to_dict()
+
+
+@app.delete("/assemble/jobs/{job_id}")
+def cancel_assembly_job(job_id: str) -> dict:
+    if not request_cancel(job_id):
+        raise HTTPException(status_code=404, detail="Job not found.")
+    job = get_job(job_id)
+    return job.to_dict() if job else {"jobId": job_id, "status": "cancelled"}
 
 
 @app.post("/validate/json")

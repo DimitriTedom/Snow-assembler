@@ -5,6 +5,8 @@ const ENGINE_URL =
   process.env.ASSEMBLER_ENGINE_URL ??
   "http://localhost:8001";
 
+const PROJECT_ROOT = (process.env.PROJECT_DATA_ROOT ?? "").replace(/\\/g, "/");
+
 export async function checkEngineHealth(): Promise<{
   status: "online" | "offline";
   service?: string;
@@ -49,12 +51,17 @@ export async function validateProject(request: ProjectAssemblyRequest): Promise<
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      media_type: "images",
       output_filename: "assembled.mp4",
       image_naming: "auto",
       width: 1920,
       height: 1080,
       fps: 30,
       motion: "none",
+      transition: "none",
+      transition_duration: 0.4,
+      quality: "standard",
+      export_captions: false,
       ...request,
     }),
     signal: AbortSignal.timeout(120_000),
@@ -81,12 +88,17 @@ export async function assembleImagesProject(request: ProjectAssemblyRequest): Pr
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      media_type: "images",
       output_filename: "assembled.mp4",
       image_naming: "auto",
       width: 1920,
       height: 1080,
       fps: 30,
       motion: "none",
+      transition: "none",
+      transition_duration: 0.4,
+      quality: "standard",
+      export_captions: false,
       ...request,
     }),
     signal: AbortSignal.timeout(1_800_000),
@@ -105,13 +117,26 @@ export function getEngineUrl(): string {
   return ENGINE_URL;
 }
 
-/** Map a Windows Zenn host path to the Docker mount (/data/zenn/...). */
-export function toDockerZennPath(hostPath: string): string {
+/** Map a host project path to the Docker volume mount (/data/projects/...). */
+export function toDockerProjectPath(hostPath: string): string {
   const normalized = hostPath.replace(/\\/g, "/");
-  const marker = "/Documents/Zenn/";
-  const index = normalized.indexOf(marker);
-  if (index === -1) {
+
+  if (normalized.startsWith("/data/projects/")) {
     return normalized;
   }
-  return `/data/zenn/${normalized.slice(index + marker.length)}`;
+
+  if (PROJECT_ROOT) {
+    const root = PROJECT_ROOT.replace(/\/$/, "");
+    const rootLower = root.toLowerCase();
+    const lower = normalized.toLowerCase();
+    if (lower.startsWith(rootLower)) {
+      const suffix = normalized.slice(root.length).replace(/^\//, "");
+      return `/data/projects/${suffix}`;
+    }
+  }
+
+  return normalized;
 }
+
+/** @deprecated Use toDockerProjectPath */
+export const toDockerZennPath = toDockerProjectPath;
