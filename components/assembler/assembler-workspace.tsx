@@ -14,7 +14,7 @@ import {
   Search,
   Upload,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "react-toastify";
 
 import { EngineStatus } from "@/components/assembler/engine-status";
 import { SystemMonitor } from "@/components/assembler/system-monitor";
@@ -313,7 +313,7 @@ export function AssemblerWorkspace() {
                 setSettings(craveSettings);
                 setValidation(null);
                 setAssembly(null);
-                toast.message("Loaded CRAVE test folder path.");
+                toast.info("Loaded CRAVE test folder path.");
               }}
             >
               Load test episode

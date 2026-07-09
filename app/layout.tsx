@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "../styles/globals.css";
+import "react-toastify/dist/ReactToastify.css";
 
 import { AmbientBackground } from "@/components/ambient-background";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -35,7 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <AmbientBackground />
           <SiteHeader />
           <main className="mx-auto w-full max-w-7xl px-4 pb-16 pt-24 sm:px-6 lg:px-8">{children}</main>
-          <Toaster richColors closeButton />
+          <Toaster />
         </ThemeProvider>
       </body>
     </html>
