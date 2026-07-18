@@ -34,21 +34,34 @@ const PROJECT_ROOT = (
   process.env.NEXT_PUBLIC_PROJECT_DATA_ROOT ?? process.env.PROJECT_DATA_ROOT ?? ""
 ).replace(/\\/g, "/");
 
-const LEGACY_MARKERS = [
-  { marker: "/documents/zenn/", mount: "/data/zenn/" },
-  { marker: "/crave & conquer/videos/", mount: "/data/crave-videos/" },
-  { marker: "/crave & conquer/", mount: "/data/crave-root/" },
-] as const;
+const getPathMappings = (): Array<{ marker: string; mount: string }> => {
+  const envVal = process.env.PATH_MAPPINGS ?? "";
+  if (envVal.trim() && envVal.trim().toLowerCase() !== "none") {
+    return envVal.split(",").map(pair => {
+      const [marker, mount] = pair.split("=");
+      return {
+        marker: marker.trim().toLowerCase(),
+        mount: mount.trim()
+      };
+    }).filter(item => item.marker && item.mount);
+  }
+  
+  // Default legacy fallbacks for backward compatibility
+  return [
+    { marker: "/documents/zenn/", mount: "/data/zenn/" },
+    { marker: "/crave & conquer/videos/", mount: "/data/crave-videos/" },
+    { marker: "/crave & conquer/", mount: "/data/crave-root/" },
+  ];
+};
 
 /** Convert a host project path to the matching Docker volume mount. */
 export function toDockerProjectPath(hostPath: string): string {
   const normalized = hostPath.replace(/\\/g, "/");
+  const mappings = getPathMappings();
 
   if (
     normalized.startsWith("/data/projects/") ||
-    normalized.startsWith("/data/zenn/") ||
-    normalized.startsWith("/data/crave-videos/") ||
-    normalized.startsWith("/data/crave-root/")
+    mappings.some(m => normalized.startsWith(m.mount))
   ) {
     return normalized;
   }
@@ -63,7 +76,7 @@ export function toDockerProjectPath(hostPath: string): string {
     }
   }
 
-  for (const entry of LEGACY_MARKERS) {
+  for (const entry of mappings) {
     const index = lower.indexOf(entry.marker);
     if (index !== -1) {
       const suffix = normalized.slice(index + entry.marker.length);
